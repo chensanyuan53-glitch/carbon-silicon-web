@@ -21,6 +21,11 @@ export const Station: React.FC = () => {
     published: true,
   });
 
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  // 判断是否为管理员（从profiles表查询is_admin字段）
+
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [caseForm, setCaseForm] = useState({
     title: '',
@@ -74,10 +79,44 @@ export const Station: React.FC = () => {
     }
   };
 
+  const [caseData, setCaseData] = useState<any[]>([]);
+  const [categories, setCategories] = useState<AiCategory[]>([]);
+  const [toolsMap, setToolsMap] = useState<Record<string, AiTool[]>>({});
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<{ id?: number; title?: string } | null>(null);
+
+  // 初始化：获取用户信息和管理员状态
+  const fetchUserAdminStatus = async (userId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('is_admin')
+        .eq('id', userId)
+        .single();
+      
+      if (error) {
+        console.error('Error fetching admin status:', error);
+        setIsAdmin(false);
+        return;
+      }
+      
+      setIsAdmin(data?.is_admin || false);
+    } catch (err) {
+      console.error('Unexpected error fetching admin status:', err);
+      setIsAdmin(false);
+    }
+  };
+
   useEffect(() => {
     const init = async () => {
       const { data } = await supabase.auth.getUser();
-      setCurrentUserId(data?.user?.id || null);
+      const userId = data?.user?.id || null;
+      setCurrentUserId(userId);
+      
+      if (userId) {
+        await fetchUserAdminStatus(userId);
+      }
+      
       await fetchNews();
       await fetchCases();
       await fetchLearning();
@@ -85,14 +124,6 @@ export const Station: React.FC = () => {
     init();
   }, []);
 
-  const [caseData, setCaseData] = useState<any[]>([]);
-  const [categories, setCategories] = useState<AiCategory[]>([]);
-  const [toolsMap, setToolsMap] = useState<Record<string, AiTool[]>>({});
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState<{ id?: number; title?: string } | null>(null);
-
-  // Toast notification state
   const [toast, setToast] = useState<{ visible: boolean; message: string; type?: 'success' | 'error' | 'info' }>({ visible: false, message: '', type: 'info' });
 
   const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info', duration = 3000) => {
@@ -211,7 +242,7 @@ export const Station: React.FC = () => {
           ))}
           </div>
 
-          <div className="ml-4">
+          {isAdmin && (
             <button
               onClick={async () => {
                 const { data } = await supabase.auth.getUser();
@@ -231,7 +262,7 @@ export const Station: React.FC = () => {
             >
               {activeTab === 'news' ? '发布资讯' : activeTab === 'cases' ? '上传案例' : activeTab === 'learning' ? '添加' : '发布资讯'}
             </button>
-          </div>
+          )}
         </div>
 
         {/* Content Section A: News */}
@@ -810,12 +841,11 @@ export const Station: React.FC = () => {
             {/* Promo Banner (moved above tools) */}
             <div className="mt-4 bg-gradient-to-r from-indigo-900/40 to-purple-900/40 rounded-3xl p-10 border border-white/10 flex flex-col md:flex-row items-center justify-between gap-8 backdrop-blur-sm">
                <div className="max-w-xl">
-                  <h3 className="text-3xl font-bold text-white mb-3 tracking-tight">想系统学习 AI 技术？</h3>
-                  <p className="text-slate-300 text-lg leading-relaxed">加入碳硅实战训练营，从入门到精通，行业大咖手把手教学。</p>
+                  <h3 className="text-3xl font-bold text-white tracking-tight">想系统学习 AI 技术？</h3>
                </div>
-               <button className="bg-white hover:bg-slate-100 text-indigo-950 font-bold py-4 px-8 rounded-xl transition-colors whitespace-nowrap shadow-lg text-lg">
+               <a href="https://waytoagi.feishu.cn/wiki/QPe5w5g7UisbEkkow8XcDmOpn8e?from=from_copylink" target="_blank" rel="noreferrer" className="bg-white hover:bg-slate-100 text-indigo-950 font-bold py-4 px-8 rounded-xl transition-colors whitespace-nowrap shadow-lg text-lg">
                   浏览课程库
-               </button>
+               </a>
             </div>
 
             {categories.map((section, idx) => {
@@ -829,27 +859,29 @@ export const Station: React.FC = () => {
                       </div>
                       <h3 className="text-2xl font-bold text-white tracking-wide">{section.name}</h3>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => {
-                          setCategoryForm({ id: section.id || '', name: section.name, slug: section.slug || '', description: section.description || '', order: section.order || 0 });
-                          setAddMode('category');
-                          setShowAddModal(true);
-                        }}
-                        className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium bg-cyan-600 border border-cyan-500 text-white shadow hover:opacity-95 transition-colors"
-                      >
-                        编辑
-                      </button>
-                      <button
-                        onClick={() => {
-                          setDeleteCategoryTarget(section);
-                          setShowDeleteCategoryModal(true);
-                        }}
-                        className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium bg-rose-700 border border-rose-600 text-white shadow hover:opacity-95 transition-colors"
-                      >
-                        删除
-                      </button>
-                    </div>
+                    {isAdmin && (
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => {
+                            setCategoryForm({ id: section.id || '', name: section.name, slug: section.slug || '', description: section.description || '', order: section.order || 0 });
+                            setAddMode('category');
+                            setShowAddModal(true);
+                          }}
+                          className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium bg-cyan-600 border border-cyan-500 text-white shadow hover:opacity-95 transition-colors"
+                        >
+                          编辑
+                        </button>
+                        <button
+                          onClick={() => {
+                            setDeleteCategoryTarget(section);
+                            setShowDeleteCategoryModal(true);
+                          }}
+                          className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium bg-rose-700 border border-rose-600 text-white shadow hover:opacity-95 transition-colors"
+                        >
+                          删除
+                        </button>
+                      </div>
+                    )}
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
                     {items.map((tool: any, tIdx: number) => (

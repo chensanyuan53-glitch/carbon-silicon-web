@@ -16,6 +16,7 @@ export const Market: React.FC<MarketProps> = ({ onProductSelect }) => {
   const [showInquiryModal, setShowInquiryModal] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<MarketProduct | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [toast, setToast] = useState<{ visible: boolean; message: string; type?: 'success' | 'error' | 'info' }>({ visible: false, message: '', type: 'info' });
 
   const [uploadForm, setUploadForm] = useState({
@@ -41,6 +42,28 @@ export const Market: React.FC<MarketProps> = ({ onProductSelect }) => {
   const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info', duration = 3000) => {
     setToast({ visible: true, message, type });
     setTimeout(() => setToast({ visible: false, message: '', type }), duration);
+  };
+
+  // 获取用户管理员状态
+  const fetchUserAdminStatus = async (userId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('is_admin')
+        .eq('id', userId)
+        .single();
+
+      if (error) {
+        console.error('Error fetching admin status:', error);
+        setIsAdmin(false);
+        return;
+      }
+
+      setIsAdmin(data?.is_admin || false);
+    } catch (err) {
+      console.error('Unexpected error fetching admin status:', err);
+      setIsAdmin(false);
+    }
   };
 
   const getIconByType = (type: string, color: string) => {
@@ -101,7 +124,13 @@ export const Market: React.FC<MarketProps> = ({ onProductSelect }) => {
   useEffect(() => {
     const init = async () => {
       const { data } = await supabase.auth.getUser();
-      setCurrentUserId(data?.user?.id || null);
+      const userId = data?.user?.id || null;
+      setCurrentUserId(userId);
+
+      if (userId) {
+        await fetchUserAdminStatus(userId);
+      }
+
       await fetchCategories();
       await fetchProducts();
     };
@@ -226,19 +255,21 @@ export const Market: React.FC<MarketProps> = ({ onProductSelect }) => {
                 <ShoppingBag size={22} />
              </button>
            </div>
-           <button
-             onClick={() => {
-               if (!currentUserId) {
-                 showToast('请先登录后上传应用', 'info');
-                 return;
-               }
-               setShowUploadModal(true);
-             }}
-             className="bg-cyan-600 hover:bg-cyan-500 text-white px-6 py-4 rounded-full text-sm font-bold flex items-center gap-2 transition-all shadow-lg shadow-cyan-500/20"
-           >
-              <Plus size={18} />
-              <span>上传应用</span>
-           </button>
+           {isAdmin && (
+             <button
+               onClick={() => {
+                 if (!currentUserId) {
+                   showToast('请先登录后上传应用', 'info');
+                   return;
+                 }
+                 setShowUploadModal(true);
+               }}
+               className="bg-cyan-600 hover:bg-cyan-500 text-white px-6 py-4 rounded-full text-sm font-bold flex items-center gap-2 transition-all shadow-lg shadow-cyan-500/20"
+             >
+                <Plus size={18} />
+                <span>上传应用</span>
+             </button>
+           )}
         </div>
 
         {/* Categories */}
