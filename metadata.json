@@ -1,0 +1,7 @@
+{
+  "name": "Carbon-Silicon Co-Creation",
+  "description": "一个由 AI 驱动的共创社区，连接技术采用者和领域专家，共同变革行业。",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}

@@ -1,0 +1,17 @@
+-- ============================================================
+-- 验证通知功能是否生效（在 Supabase SQL 编辑器中运行）
+-- ============================================================
+-- 1. 检查 notifications 表是否存在且有数据：
+--    SELECT * FROM public.notifications ORDER BY created_at DESC LIMIT 5;
+--
+-- 2. 检查触发器是否存在：
+--    SELECT tgname, tgrelid::regclass FROM pg_trigger WHERE tgname = 'tr_notify_creator_on_task_claim';
+--
+-- 3. 检查 task_claims 和 tasks_reward 的列（确认 task_id / user_id 类型一致）：
+--    SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'task_claims';
+--    SELECT column_name, data_type FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'tasks_reward';
+--
+-- 4. 若触发器存在但从未插入过通知，可手动执行一次“模拟接单”测试（把下面的 YOUR_CREATOR_UUID 和 YOUR_TASK_ID 换成真实值）：
+--    INSERT INTO public.task_claims (claimant_id, task_id, claimed_at)
+--    VALUES ('接单人的 user uuid', '任务 id（与 tasks_reward.id 一致）', now());
+--    然后查： SELECT * FROM public.notifications ORDER BY id DESC LIMIT 1;
