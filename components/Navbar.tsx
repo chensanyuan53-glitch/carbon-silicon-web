@@ -99,13 +99,6 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPage, onNavigate, session
 
           {/* User Actions */}
           <div className="flex items-center gap-4">
-            <button 
-              onClick={() => onNavigate(Page.TASKS)}
-              className="hidden sm:block bg-gradient-to-r from-orange-600 to-red-600 text-white text-sm px-4 py-1.5 rounded-full hover:shadow-lg hover:shadow-orange-500/20 transition-all"
-            >
-              发布需求
-            </button>
-
             {/* 6. 核心修改：根据是否登录显示不同内容 */}
             {session ? (
               // === 如果已登录 (session存在) ===

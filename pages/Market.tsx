@@ -290,35 +290,43 @@ export const Market: React.FC<MarketProps> = ({ onProductSelect }) => {
         </div>
 
         {/* Featured Product Banner */}
-        <div className="bg-gradient-to-r from-blue-900/40 to-indigo-900/40 border border-indigo-500/20 rounded-3xl p-10 mb-16 flex flex-col md:flex-row items-center gap-10 shadow-2xl">
+        <div
+          className="bg-gradient-to-r from-purple-900/40 to-pink-900/40 border border-purple-500/20 rounded-3xl p-10 mb-16 flex flex-col md:flex-row items-center gap-10 shadow-2xl cursor-pointer hover:shadow-purple-500/10 transition-all"
+          onClick={() => {
+            const featuredProduct = products.find(p => p.title === 'AI智能设计平台');
+            if (featuredProduct && onProductSelect) {
+              onProductSelect(String(featuredProduct.id));
+            }
+          }}
+        >
            <div className="flex-1">
-              <span className="bg-indigo-500 text-white text-xs font-bold px-3 py-1 rounded-md mb-4 inline-block tracking-wide shadow-lg shadow-indigo-500/30">本月销冠</span>
+              <span className="bg-purple-500 text-white text-xs font-bold px-3 py-1 rounded-md mb-4 inline-block tracking-wide shadow-lg shadow-purple-500/30">热门推荐</span>
               <h2 className="text-3xl md:text-4xl font-bold text-white mb-6 leading-tight">
-                装修公司客服太贵？<br/>
-                设计师加班到深夜？<br/>
-                <span className="text-slate-400">营销文案没灵感？</span>
+                AI智能设计平台
               </h2>
-              <p className="text-slate-300 mb-8 leading-relaxed text-lg max-w-lg">集成智能客服应答、自动生成设计方案描述、一键产出朋友圈营销文案。让 AI 成为你的全能员工。</p>
-              <button className="bg-indigo-600 hover:bg-indigo-500 text-white px-8 py-3 rounded-xl font-bold transition-all shadow-lg hover:shadow-indigo-500/30 text-lg">
+              <p className="text-slate-300 mb-8 leading-relaxed text-lg max-w-lg">
+                基于深度学习的智能设计工具，支持自动生成设计方案、智能配图、风格迁移等功能。让设计变得简单高效，一键生成专业级设计作品。
+              </p>
+              <button className="bg-purple-600 hover:bg-purple-500 text-white px-8 py-3 rounded-xl font-bold transition-all shadow-lg hover:shadow-purple-500/30 text-lg">
                 查看解决方案
               </button>
            </div>
            <div className="flex-1 w-full max-w-md bg-slate-800 rounded-2xl p-6 shadow-2xl border border-slate-700/80">
               <div className="flex items-center gap-3 mb-4 border-b border-slate-700 pb-3">
-                 <div className="w-10 h-10 rounded-full bg-indigo-500 flex items-center justify-center text-white shadow-lg">
+                 <div className="w-10 h-10 rounded-full bg-purple-500 flex items-center justify-center text-white shadow-lg">
                     <Zap size={20} />
                  </div>
                  <div>
-                    <p className="text-white text-sm font-bold">智能助手</p>
+                    <p className="text-white text-sm font-bold">AI智能设计</p>
                     <p className="text-xs text-green-400 font-medium flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse"></span>在线</p>
                  </div>
               </div>
               <div className="space-y-4">
                  <div className="bg-slate-700/50 p-3 rounded-2xl rounded-tl-none text-sm text-slate-200 w-4/5 leading-relaxed">
-                    请帮我生成一套适合90后年轻夫妇的北欧风装修文案，强调简约和自然。
+                    帮我设计一套现代简约风格的客厅，色调以灰白为主，加入一点蓝色作为点缀。
                  </div>
-                 <div className="bg-indigo-600 p-3 rounded-2xl rounded-tr-none text-sm text-white w-4/5 ml-auto shadow-md leading-relaxed">
-                    没问题！基于您的需求，这里有3个不同切入点的文案方案：<br/>1. "回归自然，拥抱纯粹..."
+                 <div className="bg-purple-600 p-3 rounded-2xl rounded-tr-none text-sm text-white w-4/5 ml-auto shadow-md leading-relaxed">
+                    已为您生成3套设计方案！方案一采用极简主义风格，灰色墙面搭配蓝色地毯...
                  </div>
               </div>
            </div>

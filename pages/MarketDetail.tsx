@@ -16,6 +16,13 @@ export const MarketDetail: React.FC<MarketDetailProps> = ({ productId, onBack })
     contact_method: '',
     message: ''
   });
+  const [sending, setSending] = useState(false);
+  const [toast, setToast] = useState<{ visible: boolean; message: string; type?: 'success' | 'error' | 'info' }>({ visible: false, message: '', type: 'info' });
+
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info', duration = 3000) => {
+    setToast({ visible: true, message, type });
+    setTimeout(() => setToast({ visible: false, message: '', type }), duration);
+  };
 
   useEffect(() => {
     const fetchProduct = async () => {
@@ -86,28 +93,38 @@ export const MarketDetail: React.FC<MarketDetailProps> = ({ productId, onBack })
     const { data } = await supabase.auth.getUser();
     const user = data?.user;
     if (!user) {
-      alert('请先登录后联系购买');
+      showToast('请先登录后联系购买', 'info');
       return;
     }
     if (!contactForm.contact_method) {
-      alert('请填写联系方式');
+      showToast('请填写联系方式', 'error');
       return;
     }
 
-    const { error } = await supabase.from('market_product_inquiries').insert([{
-      product_id: parseInt(productId),
-      user_id: user.id,
-      contact_method: contactForm.contact_method,
-      message: contactForm.message || null
-    }]);
+    setSending(true);
 
-    if (error) {
-      console.error('submit inquiry error', error);
-      alert('提交失败，请稍后重试');
-    } else {
-      alert('已发送购买咨询，卖家会尽快联系您');
+    try {
+      const { error } = await supabase.from('market_product_inquiries').insert([{
+        product_id: parseInt(productId),
+        user_id: user.id,
+        contact_method: contactForm.contact_method,
+        message: contactForm.message || null
+      }]);
+
+      if (error) {
+        console.error('submit inquiry error', error);
+        showToast('提交失败，请稍后重试', 'error');
+        return;
+      }
+
+      showToast('已发送购买咨询，卖家会尽快联系您', 'success');
       setShowContactModal(false);
       setContactForm({ contact_method: '', message: '' });
+    } catch (err) {
+      console.error('提交咨询异常:', err);
+      showToast('提交失败，请稍后重试', 'error');
+    } finally {
+      setSending(false);
     }
   };
 
@@ -331,18 +348,31 @@ export const MarketDetail: React.FC<MarketDetailProps> = ({ productId, onBack })
                 <div className="flex items-center justify-end gap-3 pt-2">
                   <button
                     onClick={() => setShowContactModal(false)}
-                    className="px-4 py-2 rounded-full bg-slate-700 text-slate-300 hover:text-white transition-colors"
+                    disabled={sending}
+                    className="px-4 py-2 rounded-full bg-slate-700 text-slate-300 hover:text-white transition-colors disabled:opacity-50"
                   >
                     取消
                   </button>
                   <button
                     onClick={handleSubmitContact}
-                    className="px-4 py-2 rounded-full bg-cyan-600 border border-cyan-500 text-white font-medium hover:opacity-95 transition-colors"
+                    disabled={sending}
+                    className="px-4 py-2 rounded-full bg-cyan-600 border border-cyan-500 text-white font-medium hover:opacity-95 transition-colors disabled:opacity-50 flex items-center gap-2"
                   >
-                    发送咨询
+                    {sending ? '发送中...' : '发送咨询'}
                   </button>
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Toast 提示 */}
+      {toast.visible && (
+        <div style={{ zIndex: 9999 }} className="fixed inset-0 flex items-center justify-center pointer-events-none">
+          <div className="pointer-events-auto max-w-lg w-full mx-4">
+            <div className={`rounded-xl border-2 p-5 px-6 shadow-2xl ${toast.type === 'error' ? 'bg-rose-900 border-rose-500' : toast.type === 'success' ? 'bg-emerald-900 border-emerald-500' : 'bg-slate-800 border-cyan-500'} text-white text-center transform transition duration-200 scale-100`}>
+              <div className="text-lg font-semibold">{toast.message}</div>
             </div>
           </div>
         </div>

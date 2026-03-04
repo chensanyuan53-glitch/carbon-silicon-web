@@ -14,6 +14,7 @@ import { Market } from './pages/Market';
 import { MarketDetail } from './pages/MarketDetail';
 import { Register } from './pages/Register';
 import { AIChat } from './components/AIChat';
+import { NotificationBell } from './components/NotificationBell';
 
 function App() {
   const [currentPage, setCurrentPage] = useState<Page>(Page.HOME);
@@ -108,6 +109,9 @@ function App() {
 
       {/* Global AI Assistant */}
       <AIChat />
+
+      {/* 通知铃铛组件 */}
+      <NotificationBell session={session} />
 
       {/* Footer */}
       <footer className="bg-slate-950 border-t border-slate-800 py-12 text-slate-400 text-sm">
