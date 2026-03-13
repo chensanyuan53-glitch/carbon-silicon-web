@@ -64,7 +64,7 @@ export const Tasks: React.FC = () => {
     isOpen: boolean;
     title: string;
     desc: string;
-    actionType: 'delete' | 'off';
+    actionType: 'delete' | 'off' | 'renew' | 'claim';
     taskId: string;
   }>({ isOpen: false, title: '', desc: '', actionType: 'off', taskId: '' });
 
@@ -192,7 +192,17 @@ export const Tasks: React.FC = () => {
   }, []);
 
   // --- 3. 续期逻辑 ---
-  const handleRenew = async (id: string) => {
+  const triggerRenew = (id: string) => {
+    setConfirmConfig({
+      isOpen: true,
+      taskId: id,
+      actionType: 'renew',
+      title: '续期任务',
+      desc: '续期后任务将重新获得 12 小时的展示时间，其他用户可以在大厅看到此任务。'
+    });
+  };
+
+  const executeRenew = async (id: string) => {
     try {
       const { error } = await supabase
         .from('tasks_reward')
@@ -236,7 +246,15 @@ export const Tasks: React.FC = () => {
   const executeManageAction = async () => {
     const { taskId, actionType } = confirmConfig;
     try {
-      if (actionType === 'delete') {
+      if (actionType === 'claim') {
+        // 接单确认：关闭确认框，显示联系方式
+        setConfirmConfig(prev => ({ ...prev, isOpen: false }));
+        if (pendingClaimTask) {
+          handleShowContact(pendingClaimTask.contact);
+        }
+      } else if (actionType === 'renew') {
+        await executeRenew(taskId);
+      } else if (actionType === 'delete') {
         const delClaimsRes = await supabase.from('task_claims').delete().eq('task_id', taskId);
         if (delClaimsRes.error) {
           showNotice('删除关联接单记录失败: ' + delClaimsRes.error.message, 'error');
@@ -313,8 +331,15 @@ export const Tasks: React.FC = () => {
         return;
       }
 
+      // 设置待接单任务并显示二次确认弹框
       setPendingClaimTask(task);
-      handleShowContact(task.contact);
+      setConfirmConfig({
+        isOpen: true,
+        taskId: task.id,
+        actionType: 'claim',
+        title: '确认接单',
+        desc: '确认接单后将显示发布者的联系方式，请您及时联系。接单后不可撤销。'
+      });
     } catch (err: unknown) {
       showNotice(err instanceof Error ? err.message : '接单失败', 'error');
     }
@@ -441,18 +466,33 @@ export const Tasks: React.FC = () => {
         </div>
       )}
 
-      {/* 管理操作确认弹窗 */}
+        {/* 管理操作确认弹窗 */}
       {confirmConfig.isOpen && (
         <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-[#1e293b] w-full max-w-[360px] rounded-3xl border border-slate-700 shadow-2xl p-8 text-center animate-in zoom-in duration-300">
-            <div className={`mx-auto w-16 h-16 rounded-full flex items-center justify-center mb-6 ${confirmConfig.actionType === 'delete' ? 'bg-red-500/10 text-red-500' : 'bg-orange-500/10 text-orange-500'}`}>
+            <div className={`mx-auto w-16 h-16 rounded-full flex items-center justify-center mb-6 ${
+              confirmConfig.actionType === 'delete' ? 'bg-red-500/10 text-red-500' :
+              'bg-orange-500/10 text-orange-500'
+            }`}>
               <AlertTriangle size={32} />
             </div>
             <h3 className="text-xl font-bold text-white mb-2">{confirmConfig.title}</h3>
             <p className="text-slate-400 text-sm leading-relaxed mb-8">{confirmConfig.desc}</p>
             <div className="flex gap-3">
-              <button onClick={() => setConfirmConfig(prev => ({ ...prev, isOpen: false }))} className="flex-1 py-3 rounded-xl bg-slate-800 text-slate-300 font-bold hover:bg-slate-700 transition-colors">取消</button>
-              <button onClick={executeManageAction} className={`flex-1 py-3 rounded-xl text-white font-bold transition-transform active:scale-95 ${confirmConfig.actionType === 'delete' ? 'bg-red-500 hover:bg-red-600 shadow-lg shadow-red-900/20' : 'bg-orange-500 hover:bg-orange-600 shadow-lg shadow-orange-900/20'}`}>确定执行</button>
+              <button 
+                onClick={() => {
+                  setConfirmConfig(prev => ({ ...prev, isOpen: false }));
+                  // 如果是接单确认取消，同时清除待接单任务
+                  if (confirmConfig.actionType === 'claim') {
+                    setPendingClaimTask(null);
+                  }
+                }} 
+                className="flex-1 py-3 rounded-xl bg-slate-800 text-slate-300 font-bold hover:bg-slate-700 transition-colors"
+              >取消</button>
+              <button onClick={executeManageAction} className={`flex-1 py-3 rounded-xl text-white font-bold transition-transform active:scale-95 ${
+                confirmConfig.actionType === 'delete' ? 'bg-red-500 hover:bg-red-600 shadow-lg shadow-red-900/20' :
+                'bg-orange-500 hover:bg-orange-600 shadow-lg shadow-orange-900/20'
+              }`}>确定执行</button>
             </div>
           </div>
         </div>
@@ -549,7 +589,7 @@ export const Tasks: React.FC = () => {
                           {!task.isActive ? (
                             <button onClick={() => handlePublish(task.id)} className="text-green-500 text-xs font-bold hover:bg-green-500/10 p-2 rounded-lg flex items-center gap-1 border border-green-500/30 transition-all">上架</button>
                           ) : isExpired ? (
-                            <button onClick={() => handleRenew(task.id)} className="text-orange-500 text-xs font-bold hover:bg-orange-500/10 p-2 rounded-lg flex items-center gap-1 border border-orange-500/30 transition-all"><RefreshCw size={14} /> 一键续期</button>
+                            <button onClick={() => triggerRenew(task.id)} className="text-orange-500 text-xs font-bold hover:bg-orange-500/10 p-2 rounded-lg flex items-center gap-1 border border-orange-500/30 transition-all"><RefreshCw size={14} /> 一键续期</button>
                           ) : (
                             <button onClick={() => triggerConfirm(task.id, 'off')} className="text-slate-400 text-xs font-bold hover:text-orange-400 flex items-center gap-1"><EyeOff size={14} /> 下架</button>
                           )}
@@ -751,7 +791,7 @@ export const Tasks: React.FC = () => {
                         onClick={(e) => {
                           e.stopPropagation();
                           setIsDetailModalOpen(false);
-                          handleRenew(selectedTask.id);
+                          triggerRenew(selectedTask.id);
                         }}
                         className="px-6 py-2.5 bg-orange-600 hover:bg-orange-500 text-white rounded-xl font-medium transition-colors flex items-center gap-2"
                       >

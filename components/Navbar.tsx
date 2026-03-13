@@ -67,16 +67,11 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPage, onNavigate, session
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
           {/* Logo */}
-          <div 
+          <div
             className="flex items-center gap-2 cursor-pointer"
             onClick={() => onNavigate(Page.HOME)}
           >
-            <div className="w-8 h-8 rounded bg-gradient-to-tr from-orange-500 to-red-500 flex items-center justify-center text-white font-bold">
-              C-Si
-            </div>
-            <span className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-slate-400">
-              碳硅合创
-            </span>
+            <img src="/logo.png" alt="Logo" className="h-24 w-auto" />
           </div>
 
           {/* Desktop Menu */}
