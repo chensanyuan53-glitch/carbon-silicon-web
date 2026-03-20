@@ -131,8 +131,11 @@ export const Market: React.FC<MarketProps> = ({ onProductSelect }) => {
         await fetchUserAdminStatus(userId);
       }
 
-      await fetchCategories();
-      await fetchProducts();
+      // 并行请求，提高加载速度
+      await Promise.all([
+        fetchCategories(),
+        fetchProducts()
+      ]);
     };
     init();
   }, [selectedCategory]);

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Page } from '../types';
-import { ArrowRight, Zap, Users, Shield, Cpu, Timer, Trophy } from 'lucide-react';
+import { ArrowRight, Zap, Users, Shield, Cpu, Timer, Trophy, ChevronLeft, ChevronRight } from 'lucide-react';
 import { supabase } from '../src/supabaseClient';
 
 interface HomeProps {
@@ -17,9 +17,62 @@ interface Task {
   [key: string]: any;
 }
 
+interface CarouselSlide {
+  id: string;
+  title: string;
+  description: string;
+  image: string;
+  link?: Page;
+  externalUrl?: string;
+  badge?: string;
+}
+
 export const Home: React.FC<HomeProps> = ({ onNavigate }) => {
   const [latestTask, setLatestTask] = useState<Task | null>(null);
   const [loading, setLoading] = useState(true);
+  const [currentSlide, setCurrentSlide] = useState(0);
+  const [isAutoPlaying, setIsAutoPlaying] = useState(true);
+
+  const carouselSlides: CarouselSlide[] = [
+    {
+      id: 'slide1',
+      title: 'AI 创意设计大赛',
+      description: '用 AI 工具创作独特作品，赢取丰厚奖金',
+      image: '/carousel1.jpg',
+      link: Page.ARENA,
+      badge: '热门活动'
+    },
+    {
+      id: 'slide2',
+      title: '上传你的轮播图',
+      description: '等待你上传图片和内容',
+      image: '/carousel2.jpg',
+      externalUrl: 'https://community.cssymbiosis.com/',
+      badge: '待添加'
+    }
+  ];
+
+  const nextSlide = () => {
+    setCurrentSlide((prev) => (prev + 1) % carouselSlides.length);
+  };
+
+  const prevSlide = () => {
+    setCurrentSlide((prev) => (prev - 1 + carouselSlides.length) % carouselSlides.length);
+  };
+
+  const goToSlide = (index: number) => {
+    setCurrentSlide(index);
+  };
+
+  useEffect(() => {
+    if (!isAutoPlaying) return;
+
+    const interval = setInterval(() => {
+      nextSlide();
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [isAutoPlaying]);
 
   useEffect(() => {
     const fetchLatestTask = async () => {
@@ -53,46 +106,82 @@ export const Home: React.FC<HomeProps> = ({ onNavigate }) => {
         <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-sm"></div>
         
         <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-24 lg:py-32 flex flex-col items-center text-center">
-          <div className="flex items-center gap-2 text-cyan-400 mb-8 bg-cyan-950/30 px-5 py-2 rounded-full border border-cyan-500/30 shadow-lg shadow-cyan-500/10 backdrop-blur-md">
-            <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></span>
-            <span className="text-sm font-medium tracking-wide">重塑行业新生态</span>
-          </div>
-          
-          <h1 className="text-4xl md:text-6xl font-bold tracking-tight mb-8 leading-tight">
-            <span className="bg-clip-text text-transparent bg-gradient-to-r from-white via-slate-200 to-slate-400">
-              碳基智慧引领，
-            </span>
-            <br className="hidden md:block" />
-            <span className="bg-clip-text text-transparent bg-gradient-to-r from-cyan-400 to-blue-500 mt-2 inline-block">
-              硅基能力落地
-            </span>
-          </h1>
-          
-          <p className="max-w-2xl text-lg md:text-xl text-slate-300 mb-12 leading-relaxed tracking-wide font-light">
-            连接 AI 探索者与行业专家，共创 AI 原生应用。<br className="hidden md:block" />打破技术壁垒，让创意真正落地为生产力。
-          </p>
-          
-          <div className="flex flex-col sm:flex-row gap-5 w-full max-w-lg">
-            <button 
-              onClick={() => onNavigate(Page.TASKS)}
-              className="flex-1 bg-gradient-to-r from-orange-500 to-red-600 hover:from-orange-600 hover:to-red-700 text-white px-8 py-4 rounded-xl font-semibold transition-all flex items-center justify-center gap-3 group shadow-lg shadow-orange-500/20 hover:shadow-orange-500/40 hover:-translate-y-0.5"
+          {/* Carousel */}
+          <div
+            className="relative w-full max-w-4xl h-96 md:h-[28rem] lg:h-[32rem] rounded-2xl overflow-hidden shadow-2xl"
+            onMouseEnter={() => setIsAutoPlaying(false)}
+            onMouseLeave={() => setIsAutoPlaying(true)}
+          >
+            {/* Background Images */}
+            <div className="absolute inset-0">
+              {carouselSlides.map((slide, index) => (
+                <div
+                  key={slide.id}
+                  className={`absolute inset-0 transition-opacity duration-700 ${
+                    index === currentSlide ? 'opacity-100' : 'opacity-0'
+                  }`}
+                >
+                  <img
+                    src={slide.image}
+                    alt={slide.title}
+                    className="w-full h-full object-cover"
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-slate-900/90 via-slate-900/40 to-transparent"></div>
+                </div>
+              ))}
+            </div>
+
+            {/* Navigation Arrows */}
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                prevSlide();
+              }}
+              className="absolute left-4 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-slate-900/80 hover:bg-slate-800 text-white flex items-center justify-center backdrop-blur-sm border border-white/10 transition-all hover:scale-110 shadow-lg z-20"
             >
-              <Users size={22} />
-              <div className="text-left">
-                <span className="block leading-none">我是行业专家</span>
-                <span className="text-[10px] font-normal opacity-80 block mt-1 tracking-wide">我有场景/痛点</span>
-              </div>
+              <ChevronLeft size={20} />
             </button>
-            <button 
-              onClick={() => onNavigate(Page.TASKS)}
-              className="flex-1 bg-slate-800 hover:bg-slate-700 border border-slate-600 text-white px-8 py-4 rounded-xl font-semibold transition-all flex items-center justify-center gap-3 shadow-lg hover:shadow-slate-700/50 hover:-translate-y-0.5"
+
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                nextSlide();
+              }}
+              className="absolute right-4 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-slate-900/80 hover:bg-slate-800 text-white flex items-center justify-center backdrop-blur-sm border border-white/10 transition-all hover:scale-110 shadow-lg z-20"
             >
-              <Cpu size={22} />
-              <div className="text-left">
-                <span className="block leading-none">我是 AI 探索者</span>
-                <span className="text-[10px] font-normal opacity-80 block mt-1 tracking-wide">我想实战/赚钱</span>
-              </div>
+              <ChevronRight size={20} />
             </button>
+
+            {/* Clickable overlay */}
+            <div
+              className="absolute inset-0 z-10 cursor-pointer"
+              onClick={() => {
+                const current = carouselSlides[currentSlide];
+                if (current.externalUrl) {
+                  window.open(current.externalUrl, '_blank');
+                } else if (current.link) {
+                  onNavigate(current.link);
+                }
+              }}
+            />
+
+            {/* Dots Indicator */}
+            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-2 z-30">
+              {carouselSlides.map((_, index) => (
+                <button
+                  key={index}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    goToSlide(index);
+                  }}
+                  className={`w-2 h-2 rounded-full transition-all ${
+                    index === currentSlide
+                      ? 'bg-cyan-400 w-6'
+                      : 'bg-slate-600 hover:bg-slate-500'
+                  }`}
+                />
+              ))}
+            </div>
           </div>
 
           {/* Ticker */}

@@ -12,6 +12,7 @@ const DOMAIN_OPTIONS = ['家装', '农业', '能源', '职场'];
 
 export const Register: React.FC<RegisterProps> = ({ onNavigate }) => {
   const [isLogin, setIsLogin] = useState(true);
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
   const [formData, setFormData] = useState({
     email: '', // 改名：username -> email，因为 Supabase 用邮箱登录
     password: '',
@@ -21,6 +22,12 @@ export const Register: React.FC<RegisterProps> = ({ onNavigate }) => {
   const [selectedDomains, setSelectedDomains] = useState<string[]>([]);
   const [skills, setSkills] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [toast, setToast] = useState<{ visible: boolean; message: string; type?: 'success' | 'error' | 'info' }>({ visible: false, message: '', type: 'info' });
+
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
+    setToast({ visible: true, message, type });
+    setTimeout(() => setToast({ visible: false, message: '', type }), 3000);
+  };
 
   const toggleDomain = (domain: string) => {
     setSelectedDomains(prev => 
@@ -35,18 +42,34 @@ export const Register: React.FC<RegisterProps> = ({ onNavigate }) => {
     setIsSubmitting(true);
 
     try {
-      if (isLogin) {
+      if (showForgotPassword) {
+        // === 忘记密码逻辑 ===
+        if (!formData.email) {
+          showToast('请输入邮箱地址', 'error');
+          return;
+        }
+
+        const { error } = await supabase.auth.resetPasswordForEmail(formData.email, {
+          redirectTo: `${window.location.origin}/reset-password`,
+        });
+
+        if (error) throw error;
+
+        showToast('重置密码邮件已发送到您的邮箱，请查收', 'success');
+        setShowForgotPassword(false);
+
+      } else if (isLogin) {
         // === 登录逻辑 ===
         const { error } = await supabase.auth.signInWithPassword({
           email: formData.email,
           password: formData.password,
         });
-        
+
         if (error) throw error;
-        
+
         // 登录成功，跳转首页
         onNavigate(Page.HOME);
-        
+
       } else {
         // === 注册逻辑 ===
         const { data, error } = await supabase.auth.signUp({
@@ -76,11 +99,36 @@ export const Register: React.FC<RegisterProps> = ({ onNavigate }) => {
           if (signInError) throw signInError;
         }
 
-        alert('注册成功，已为您登录');
+        showToast('注册成功，已为您登录', 'success');
         onNavigate(Page.HOME);
       }
     } catch (error: any) {
-      alert(`操作失败: ${error.message}`);
+      // 根据 Supabase 错误类型返回中文提示
+      let errorMessage = '操作失败，请稍后重试';
+      
+        if (error) {
+          const message = error.message?.toLowerCase() || '';
+
+          if (message.includes('invalid login credentials')) {
+            errorMessage = '邮箱或密码错误，请检查后重试';
+          } else if (message.includes('user not found')) {
+            errorMessage = '用户不存在，请检查邮箱是否正确';
+          } else if (message.includes('email not confirmed')) {
+            errorMessage = '邮箱未验证，请先查收验证邮件';
+          } else if (message.includes('weak password')) {
+            errorMessage = '密码强度不足，请使用更复杂的密码';
+          } else if (message.includes('user already registered')) {
+            errorMessage = '该邮箱已被注册，请直接登录';
+          } else if (message.includes('invalid email')) {
+            errorMessage = '邮箱格式不正确，请检查输入';
+          } else if (message.includes('reset password rate limit')) {
+            errorMessage = '重置密码请求过于频繁，请稍后再试';
+          } else {
+            errorMessage = `操作失败: ${error.message}`;
+          }
+        }
+      
+      showToast(errorMessage, 'error');
     } finally {
       setIsSubmitting(false);
     }
@@ -97,24 +145,26 @@ export const Register: React.FC<RegisterProps> = ({ onNavigate }) => {
       <div className="max-w-md w-full relative z-10 bg-slate-800/50 backdrop-blur-xl rounded-2xl border border-slate-700 shadow-2xl overflow-hidden">
         
         {/* Header / Tabs */}
-        <div className="flex border-b border-slate-700">
-          <button 
-            onClick={() => setIsLogin(true)}
-            className={`flex-1 py-4 text-center text-sm font-medium transition-colors ${
-              isLogin ? 'bg-slate-800/80 text-white border-b-2 border-cyan-500' : 'bg-transparent text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            登录
-          </button>
-          <button 
-            onClick={() => setIsLogin(false)}
-            className={`flex-1 py-4 text-center text-sm font-medium transition-colors ${
-              !isLogin ? 'bg-slate-800/80 text-white border-b-2 border-cyan-500' : 'bg-transparent text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            注册入驻
-          </button>
-        </div>
+        {!showForgotPassword && (
+          <div className="flex border-b border-slate-700">
+            <button
+              onClick={() => { setIsLogin(true); setShowForgotPassword(false); }}
+              className={`flex-1 py-4 text-center text-sm font-medium transition-colors ${
+                isLogin ? 'bg-slate-800/80 text-white border-b-2 border-cyan-500' : 'bg-transparent text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              登录
+            </button>
+            <button
+              onClick={() => { setIsLogin(false); setShowForgotPassword(false); }}
+              className={`flex-1 py-4 text-center text-sm font-medium transition-colors ${
+                !isLogin ? 'bg-slate-800/80 text-white border-b-2 border-cyan-500' : 'bg-transparent text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              注册入驻
+            </button>
+          </div>
+        )}
 
         <div className="p-8">
           <div className="text-center mb-8">
@@ -122,10 +172,10 @@ export const Register: React.FC<RegisterProps> = ({ onNavigate }) => {
               CS
             </div>
             <h2 className="text-2xl font-bold text-white tracking-tight">
-              {isLogin ? '欢迎回到碳硅合创' : '加入共创社区'}
+              {showForgotPassword ? '重置密码' : isLogin ? '欢迎回到碳硅合创' : '加入共创社区'}
             </h2>
             <p className="mt-2 text-sm text-slate-400">
-              {isLogin ? '登录以继续您的创新之旅' : '连接行业智慧与 AI 能力，共创未来'}
+              {showForgotPassword ? '请输入您的注册邮箱，我们将发送重置密码链接' : isLogin ? '登录以继续您的创新之旅' : '连接行业智慧与 AI 能力，共创未来'}
             </p>
           </div>
 
@@ -149,21 +199,51 @@ export const Register: React.FC<RegisterProps> = ({ onNavigate }) => {
               </div>
 
               {/* Password */}
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <Lock size={18} className="text-slate-500" />
+              {!showForgotPassword && (
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <Lock size={18} className="text-slate-500" />
+                  </div>
+                  <input
+                    key="password-input"
+                    id="password"
+                    name="password"
+                    type="password"
+                    required
+                    autoComplete="current-password"
+                    className="appearance-none relative block w-full px-3 py-3 pl-10 border border-slate-600 placeholder-slate-500 text-white bg-slate-900/50 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 sm:text-sm transition-all"
+                    placeholder="密码"
+                    value={formData.password}
+                    onChange={e => setFormData({...formData, password: e.target.value})}
+                  />
                 </div>
-                <input
-                  id="password"
-                  name="password"
-                  type="password"
-                  required
-                  className="appearance-none relative block w-full px-3 py-3 pl-10 border border-slate-600 placeholder-slate-500 text-white bg-slate-900/50 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 sm:text-sm transition-all"
-                  placeholder="密码"
-                  value={formData.password}
-                  onChange={e => setFormData({...formData, password: e.target.value})}
-                />
-              </div>
+              )}
+
+              {/* 忘记密码链接 */}
+              {isLogin && !showForgotPassword && (
+                <div className="text-right">
+                  <button
+                    type="button"
+                    onClick={() => setShowForgotPassword(true)}
+                    className="text-sm text-cyan-400 hover:text-cyan-300 transition-colors"
+                  >
+                    忘记密码？
+                  </button>
+                </div>
+              )}
+
+              {/* 返回登录按钮 (忘记密码状态) */}
+              {showForgotPassword && (
+                <div className="text-center">
+                  <button
+                    type="button"
+                    onClick={() => setShowForgotPassword(false)}
+                    className="text-sm text-slate-400 hover:text-slate-300 transition-colors"
+                  >
+                    ← 返回登录
+                  </button>
+                </div>
+              )}
 
               {/* Contact Info (Register Only) */}
               {!isLogin && (
@@ -277,7 +357,7 @@ export const Register: React.FC<RegisterProps> = ({ onNavigate }) => {
                 <span className="flex items-center gap-2">处理中...</span>
               ) : (
                 <span className="flex items-center gap-2">
-                  {isLogin ? '立即登录' : '立即入驻'} 
+                  {showForgotPassword ? '发送重置邮件' : isLogin ? '立即登录' : '立即入驻'}
                   {!isLogin && <ArrowRight size={16} className="group-hover:translate-x-1 transition-transform" />}
                   {isLogin && <LogIn size={16} />}
                 </span>
@@ -286,10 +366,23 @@ export const Register: React.FC<RegisterProps> = ({ onNavigate }) => {
           </form>
           
           <div className="mt-6 text-center">
-               <button onClick={() => onNavigate(Page.HOME)} className="text-sm text-slate-500 hover:text-slate-300 transition-colors">
-                   先逛逛，暂不{isLogin ? '登录' : '注册'}
-               </button>
+               {!showForgotPassword && (
+                 <button onClick={() => onNavigate(Page.HOME)} className="text-sm text-slate-500 hover:text-slate-300 transition-colors">
+                     先逛逛，暂不{isLogin ? '登录' : '注册'}
+                 </button>
+               )}
           </div>
+
+          {/* Toast */}
+          {toast.visible && (
+            <div style={{ zIndex: 9999 }} className="fixed inset-0 flex items-center justify-center pointer-events-none">
+              <div className="pointer-events-auto max-w-lg w-full mx-4">
+                <div className={`rounded-xl border-2 p-5 px-6 shadow-2xl ${toast.type === 'error' ? 'bg-rose-900 border-rose-500' : toast.type === 'success' ? 'bg-emerald-900 border-emerald-500' : 'bg-slate-800 border-cyan-500'} text-white text-center transform transition duration-200 scale-100`}>
+                  <div className="text-lg font-semibold">{toast.message}</div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

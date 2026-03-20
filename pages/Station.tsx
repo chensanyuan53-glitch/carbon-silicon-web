@@ -6,8 +6,19 @@ import { AiCategory, AiTool } from '../types';
 type Tab = 'news' | 'cases' | 'learning';
 type DomainFilter = '家装' | '农业' | '能源' | '职场';
 
-export const Station: React.FC = () => {
+interface StationProps {
+  initialTab?: string | null;
+}
+
+export const Station: React.FC<StationProps> = ({ initialTab }) => {
   const [activeTab, setActiveTab] = useState<Tab>('news');
+
+  // 如果有初始标签，设置它
+  useEffect(() => {
+    if (initialTab && (initialTab === 'news' || initialTab === 'cases' || initialTab === 'learning')) {
+      setActiveTab(initialTab as Tab);
+    }
+  }, [initialTab]);
   const [activeFilter, setActiveFilter] = useState<DomainFilter | 'all'>('家装');
   const [showPublishModal, setShowPublishModal] = useState(false);
   const [form, setForm] = useState({
@@ -47,6 +58,8 @@ export const Station: React.FC = () => {
 
   // --- Data ---
   const [newsData, setNewsData] = useState<any[]>([]);
+  const [filteredNews, setFilteredNews] = useState<any[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
 
   const fetchNews = async () => {
     try {
@@ -74,12 +87,14 @@ export const Station: React.FC = () => {
         };
       });
       setNewsData(rows);
+      setFilteredNews(rows);
     } catch (err) {
       console.error('unexpected fetch error', err);
     }
   };
 
   const [caseData, setCaseData] = useState<any[]>([]);
+  const [filteredCases, setFilteredCases] = useState<any[]>([]);
   const [categories, setCategories] = useState<AiCategory[]>([]);
   const [toolsMap, setToolsMap] = useState<Record<string, AiTool[]>>({});
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -117,9 +132,12 @@ export const Station: React.FC = () => {
         await fetchUserAdminStatus(userId);
       }
       
-      await fetchNews();
-      await fetchCases();
-      await fetchLearning();
+      // 并行请求，提高加载速度
+      await Promise.all([
+        fetchNews(),
+        fetchCases(),
+        fetchLearning()
+      ]);
     };
     init();
   }, []);
@@ -129,6 +147,42 @@ export const Station: React.FC = () => {
   const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info', duration = 3000) => {
     setToast({ visible: true, message, type });
     setTimeout(() => setToast({ visible: false, message: '', type }), duration);
+  };
+
+  // 模糊搜索逻辑
+  const fuzzySearch = (text: string, query: string): boolean => {
+    if (!query) return true;
+    const lowerText = text.toLowerCase();
+    const lowerQuery = query.toLowerCase();
+    return lowerText.includes(lowerQuery);
+  };
+
+  // 处理搜索输入
+  const handleSearch = (value: string) => {
+    setSearchQuery(value);
+
+    if (!value) {
+      // 清空搜索时显示全部
+      setFilteredNews(newsData);
+      setFilteredCases(caseData);
+      return;
+    }
+
+    // 搜索资讯（标题、标签、来源）
+    const filteredNewsData = newsData.filter(item =>
+      fuzzySearch(item.title, value) ||
+      fuzzySearch(item.tag, value) ||
+      fuzzySearch(item.source, value)
+    );
+    setFilteredNews(filteredNewsData);
+
+    // 搜索案例（标题、描述、分类）
+    const filteredCasesData = caseData.filter(item =>
+      fuzzySearch(item.title, value) ||
+      fuzzySearch(item.desc, value) ||
+      fuzzySearch(item.category, value)
+    );
+    setFilteredCases(filteredCasesData);
   };
 
   const fetchCases = async () => {
@@ -153,6 +207,7 @@ export const Station: React.FC = () => {
         user_id: r.user_id,
       }));
       setCaseData(rows);
+      setFilteredCases(rows);
     } catch (err) {
       console.error('unexpected fetchCases error', err);
     }
@@ -215,7 +270,13 @@ export const Station: React.FC = () => {
             <p className="text-slate-400 text-lg">洞察前沿，落地实践。</p>
           </div>
           <div className="relative w-full md:w-80">
-             <input type="text" placeholder="搜索资讯、案例..." className="w-full bg-slate-800 border border-slate-700 rounded-full pl-10 pr-4 py-3 text-sm text-white focus:outline-none focus:border-cyan-500 transition-colors shadow-sm" />
+             <input
+               type="text"
+               placeholder="搜索资讯、案例..."
+               value={searchQuery}
+               onChange={(e) => handleSearch(e.target.value)}
+               className="w-full bg-slate-800 border border-slate-700 rounded-full pl-10 pr-4 py-3 text-sm text-white focus:outline-none focus:border-cyan-500 transition-colors shadow-sm placeholder:text-slate-500"
+             />
              <Search size={18} className="absolute left-3.5 top-3 text-slate-400" />
           </div>
         </div>
@@ -268,34 +329,48 @@ export const Station: React.FC = () => {
         {/* Content Section A: News */}
         {activeTab === 'news' && (
           <div className="bg-slate-800/50 backdrop-blur rounded-2xl border border-slate-700 overflow-hidden animate-fade-in shadow-xl">
-            {newsData.map((item, index) => (
-              <a key={index} href={item.link || '#'} target="_blank" rel="noreferrer" className="block">
-                <div
-                  className="group flex items-center justify-between p-5 md:p-7 border-b border-slate-700/50 last:border-0 hover:bg-slate-800 transition-colors cursor-pointer"
-                >
-                  <div className="flex items-center gap-6 md:gap-8 overflow-hidden">
-                    <span className="text-slate-500 font-mono text-sm whitespace-nowrap">{item.date}</span>
-                    <div className="flex flex-col md:flex-row md:items-center gap-2 md:gap-4 overflow-hidden">
-                      <span className="text-cyan-500 bg-cyan-950/30 px-2.5 py-0.5 rounded text-xs border border-cyan-500/20 whitespace-nowrap w-fit font-medium">
-                        {item.tag}
-                      </span>
-                      <div className="flex flex-col overflow-hidden">
-                        <h3 className="text-white font-medium text-lg truncate group-hover:text-cyan-400 transition-colors tracking-wide">
-                          {item.title}
-                        </h3>
-                        {item.source && (
-                          <span className="text-slate-500 text-sm mt-1 truncate">来源：{item.source}</span>
-                        )}
+            {filteredNews.length === 0 ? (
+              <div className="p-12 text-center">
+                <Search size={48} className="mx-auto text-slate-600 mb-4" />
+                <p className="text-slate-400 text-lg mb-2">
+                  {searchQuery ? '未找到相关资讯' : '暂无资讯'}
+                </p>
+                {searchQuery && (
+                  <p className="text-slate-500 text-sm">试试其他关键词</p>
+                )}
+              </div>
+            ) : (
+              filteredNews.map((item, index) => (
+                <a key={index} href={item.link || '#'} target="_blank" rel="noreferrer" className="block">
+                  <div
+                    className="group flex items-center justify-between p-5 md:p-7 border-b border-slate-700/50 last:border-0 hover:bg-slate-800 transition-colors cursor-pointer"
+                  >
+                    <div className="flex items-center gap-6 md:gap-8 overflow-hidden">
+                      <span className="text-slate-500 font-mono text-sm whitespace-nowrap">{item.date}</span>
+                      <div className="flex flex-col md:flex-row md:items-center gap-2 md:gap-4 overflow-hidden">
+                        <span className="text-cyan-500 bg-cyan-950/30 px-2.5 py-0.5 rounded text-xs border border-cyan-500/20 whitespace-nowrap w-fit font-medium">
+                          {item.tag}
+                        </span>
+                        <div className="flex flex-col overflow-hidden">
+                          <h3 className="text-white font-medium text-lg truncate group-hover:text-cyan-400 transition-colors tracking-wide">
+                            {item.title}
+                          </h3>
+                          {item.source && (
+                            <span className="text-slate-500 text-sm mt-1 truncate">来源：{item.source}</span>
+                          )}
+                        </div>
                       </div>
                     </div>
+                    <ChevronRight size={20} className="text-slate-600 group-hover:text-white transition-colors flex-shrink-0 ml-4" />
                   </div>
-                  <ChevronRight size={20} className="text-slate-600 group-hover:text-white transition-colors flex-shrink-0 ml-4" />
-                </div>
-              </a>
-            ))}
-            <div className="p-5 text-center border-t border-slate-700/50 hover:bg-slate-800 transition-colors cursor-pointer">
-              <button className="text-sm text-slate-400 group-hover:text-white transition-colors font-medium">查看更多历史资讯</button>
-            </div>
+                </a>
+              ))
+            )}
+            {filteredNews.length > 0 && (
+              <div className="p-5 text-center border-t border-slate-700/50 hover:bg-slate-800 transition-colors cursor-pointer">
+                <button className="text-sm text-slate-400 group-hover:text-white transition-colors font-medium">查看更多历史资讯</button>
+              </div>
+            )}
           </div>
         )}
 
@@ -370,6 +445,7 @@ export const Station: React.FC = () => {
                         }
                         const { error } = await supabase.from('ai_news').insert([{
                           title: form.title,
+                          source: form.source,
                           tag: form.tag,
                           summary: form.summary,
                           content: form.summary,
@@ -765,7 +841,7 @@ export const Station: React.FC = () => {
 
             {/* Cards Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-              {caseData
+              {filteredCases
                 .filter(item => activeFilter === 'all' || item.category === activeFilter)
                 .map(item => {
                   return (
@@ -829,8 +905,11 @@ export const Station: React.FC = () => {
                   );
                 })}
             </div>
-            {caseData.filter(item => activeFilter === 'all' || item.category === activeFilter).length === 0 && (
-               <div className="text-center py-20 text-slate-500 text-lg">该分类下暂无案例</div>
+            {filteredCases.filter(item => activeFilter === 'all' || item.category === activeFilter).length === 0 && (
+               <div className="text-center py-20 text-slate-500 text-lg">
+                 {searchQuery ? '未找到相关案例' : '该分类下暂无案例'}
+                 {searchQuery && <p className="text-sm mt-2 text-slate-600">试试其他关键词</p>}
+               </div>
             )}
           </div>
         )}

@@ -38,7 +38,17 @@ const calculateTimeLeft = (createdAt: string) => {
   return `${hours}h ${minutes}m`;
 };
 
-export const Tasks: React.FC = () => {
+interface TasksProps {
+  onOpenChat?: (chat: {
+    taskId: string;
+    taskTitle: string;
+    otherUserId: string;
+    otherUserName: string;
+    currentUserId: string;
+  }) => void;
+}
+
+export const Tasks: React.FC<TasksProps> = ({ onOpenChat }) => {
   // --- 状态管理 ---
   const [tasks, setTasks] = useState<TaskItem[]>([]);
   const [tasksLoading, setTasksLoading] = useState(true);
@@ -59,6 +69,20 @@ export const Tasks: React.FC = () => {
   const [activeContact, setActiveContact] = useState<{ wechat?: string; phone?: string; qr?: string } | null>(null);
   const [pendingClaimTask, setPendingClaimTask] = useState<TaskItem | null>(null);
   const [confirmingClaim, setConfirmingClaim] = useState(false);
+
+  // 聊天对话框状态
+  const [currentUserId, setCurrentUserId] = useState<string>('');
+
+  // 获取当前用户ID
+  useEffect(() => {
+    const getCurrentUser = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        setCurrentUserId(user.id);
+      }
+    };
+    getCurrentUser();
+  }, []);
 
   const [confirmConfig, setConfirmConfig] = useState<{
     isOpen: boolean;
@@ -153,21 +177,21 @@ export const Tasks: React.FC = () => {
           });
         }
 
-        // 过滤掉客户端已标记为“已删除但无法硬删除”的任务（黑名单）
+        // 过滤掉客户端已标记为"已删除但无法硬删除"的任务（黑名单）
         const visible = filteredByExpiry.filter(t => !hiddenDeletedRef.current.includes(t.id));
         setTasks(visible);
 
-        // 获取当前用户的接单记录（仅用于个人中心的“我的接单”展示）
+        // 获取当前用户的接单记录（仅用于个人中心的"我的接单"展示）- 并行执行
         if (user) {
-          try {
-            const { data: claimsData, error: claimsErr } = await supabase
-              .from('task_claims')
-              .select('task_id')
-              .eq('claimant_id', user.id);
-            if (!claimsErr && claimsData) {
-              setClaimedTaskIds(claimsData.map((c: { task_id: string }) => c.task_id));
-            }
-          } catch (e) { console.error(e); }
+          supabase
+            .from('task_claims')
+            .select('task_id')
+            .eq('claimant_id', user.id)
+            .then(({ data: claimsData, error: claimsErr }) => {
+              if (!claimsErr && claimsData) {
+                setClaimedTaskIds(claimsData.map((c: { task_id: string }) => c.task_id));
+              }
+            });
         }
         if (process.env.NODE_ENV !== 'production') {
           console.log('DEBUG: displayed tasks after filters:', filteredByExpiry.map(t => ({ id: t.id, reward: t.rewardValue, isOwner: t.isOwner })));
@@ -247,11 +271,8 @@ export const Tasks: React.FC = () => {
     const { taskId, actionType } = confirmConfig;
     try {
       if (actionType === 'claim') {
-        // 接单确认：关闭确认框，显示联系方式
-        setConfirmConfig(prev => ({ ...prev, isOpen: false }));
-        if (pendingClaimTask) {
-          handleShowContact(pendingClaimTask.contact);
-        }
+        // 接单确认：直接调用 confirmClaim
+        await confirmClaim();
       } else if (actionType === 'renew') {
         await executeRenew(taskId);
       } else if (actionType === 'delete') {
@@ -363,7 +384,6 @@ export const Tasks: React.FC = () => {
       if (existing && existing.length > 0) {
         showNotice('您已接过该任务', 'error');
         setPendingClaimTask(null);
-        setIsContactModalOpen(false);
         setConfirmingClaim(false);
         return;
       }
@@ -373,7 +393,19 @@ export const Tasks: React.FC = () => {
 
       showNotice('接单成功，请及时与发布者联系', 'success');
       setPendingClaimTask(null);
-      setIsContactModalOpen(false);
+      setConfirmConfig(prev => ({ ...prev, isOpen: false }));
+
+      // 打开聊天对话框
+      if (onOpenChat) {
+        onOpenChat({
+          taskId: pendingClaimTask.id,
+          taskTitle: pendingClaimTask.title,
+          otherUserId: pendingClaimTask.user_id,
+          otherUserName: '发布者',
+          currentUserId: currentUserId
+        });
+      }
+
       fetchTasks();
     } catch (err: unknown) {
       showNotice(err instanceof Error ? err.message : '确认接单失败', 'error');
@@ -620,11 +652,8 @@ export const Tasks: React.FC = () => {
               {activeContact.wechat && <div className="bg-[#0f172a] p-4 rounded-xl flex items-center gap-3"><MessageCircle size={16} className="text-green-500" /><div className="text-sm text-slate-200">{activeContact.wechat}</div></div>}
               {activeContact.phone && <div className="bg-[#0f172a] p-4 rounded-xl flex items-center gap-3"><Smartphone size={16} className="text-blue-500" /><div className="text-sm text-slate-200">{activeContact.phone}</div></div>}
             </div>
-            <div className="w-full mt-6 flex gap-3">
-              <button onClick={() => { setIsContactModalOpen(false); setPendingClaimTask(null); }} className="flex-1 py-3 rounded-xl bg-slate-800 text-slate-300 font-bold hover:bg-slate-700 transition-colors">关闭</button>
-              {pendingClaimTask && (
-                <button onClick={confirmClaim} disabled={confirmingClaim} className={`flex-1 py-3 rounded-xl font-bold text-white ${confirmingClaim ? 'bg-slate-600' : 'bg-orange-500 hover:bg-orange-600'}`}>{confirmingClaim ? '确认中...' : '确认接单'}</button>
-              )}
+            <div className="w-full mt-6">
+              <button onClick={() => { setIsContactModalOpen(false); setPendingClaimTask(null); }} className="w-full py-3 rounded-xl bg-slate-800 text-slate-300 font-bold hover:bg-slate-700 transition-colors">关闭</button>
             </div>
           </div>
         </div>

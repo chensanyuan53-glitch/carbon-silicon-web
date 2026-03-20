@@ -66,11 +66,17 @@ export async function submitSolution(
   const userId = userData.user?.id;
   if (!userId) throw new Error('未检测到登录用户');
 
+  const meta = userData.user?.user_metadata || {};
+  const workerNickname = typeof meta.nickname === 'string' ? meta.nickname : '';
+  const workerAvatarUrl = typeof meta.avatar_url === 'string' ? meta.avatar_url : '';
+
   const { data, error } = await supabase
     .from('arena_submissions')
     .insert({
       arena_id: arenaId,
       worker_id: userId,
+      worker_nickname: workerNickname,
+      worker_avatar_url: workerAvatarUrl,
       summary,
       file_url: fileUrl,
     })

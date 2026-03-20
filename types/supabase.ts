@@ -18,6 +18,8 @@ export interface ArenaSubmission {
   created_at: string;
   arena_id: number;
   worker_id: string;
+  worker_nickname?: string;
+  worker_avatar_url?: string;
   summary: string | null;
   file_url: string | null;
   status: 'pending' | 'winner' | 'runner_up' | 'rejected' | string;

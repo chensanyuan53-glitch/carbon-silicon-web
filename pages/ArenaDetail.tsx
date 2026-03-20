@@ -72,6 +72,12 @@ export const ArenaDetail: React.FC<ArenaDetailProps> = ({
   const [submitModalOpen, setSubmitModalOpen] = useState(false);
   const [offlineModalOpen, setOfflineModalOpen] = useState(false);
   const [offlining, setOfflining] = useState(false);
+  const [toast, setToast] = useState<{ visible: boolean; message: string; type?: 'success' | 'error' | 'info' }>({ visible: false, message: '', type: 'info' });
+
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
+    setToast({ visible: true, message, type });
+    setTimeout(() => setToast({ visible: false, message: '', type }), 3000);
+  };
 
   const isCreator = session?.user?.id && arena?.creator_id ? arena.creator_id === session.user.id : false;
 
@@ -152,7 +158,7 @@ export const ArenaDetail: React.FC<ArenaDetailProps> = ({
       onBack();
     } catch (err) {
       console.error('Failed to offline arena:', err);
-      alert('下架失败，请重试');
+      showToast('下架失败，请重试', 'error');
     } finally {
       setOfflining(false);
     }
@@ -413,6 +419,17 @@ export const ArenaDetail: React.FC<ArenaDetailProps> = ({
                     )}
                   </button>
                 </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Toast */}
+        {toast.visible && (
+          <div style={{ zIndex: 9999 }} className="fixed inset-0 flex items-center justify-center pointer-events-none">
+            <div className="pointer-events-auto max-w-lg w-full mx-4">
+              <div className={`rounded-xl border-2 p-5 px-6 shadow-2xl ${toast.type === 'error' ? 'bg-rose-900 border-rose-500' : toast.type === 'success' ? 'bg-emerald-900 border-emerald-500' : 'bg-slate-800 border-cyan-500'} text-white text-center transform transition duration-200 scale-100`}>
+                <div className="text-lg font-semibold">{toast.message}</div>
               </div>
             </div>
           </div>

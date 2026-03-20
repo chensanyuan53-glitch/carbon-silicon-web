@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Download, Award, Trophy, Star } from 'lucide-react';
+import { Download, Award, Trophy, Star, AlertTriangle, X } from 'lucide-react';
 import type { ArenaSubmission } from '../types/supabase';
 import { gradeSubmission, updateArenaStatus } from '../src/api/arena';
 
@@ -25,6 +25,10 @@ export const CreatorDashboard: React.FC<CreatorDashboardProps> = ({
   const [score, setScore] = useState('');
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [winnerModal, setWinnerModal] = useState<{ isOpen: boolean; submissionId: number | null }>({
+    isOpen: false,
+    submissionId: null
+  });
 
   const handleScoreSubmit = async (submissionId: number) => {
     const scoreNum = Number(score);
@@ -48,17 +52,20 @@ export const CreatorDashboard: React.FC<CreatorDashboardProps> = ({
   };
 
   const handleSetWinner = async (submissionId: number) => {
-    if (!confirm('确定将该投稿设为优胜？此操作会将竞技场状态设为已完成。')) {
-      return;
-    }
+    setWinnerModal({ isOpen: true, submissionId });
+  };
+
+  const confirmSetWinner = async () => {
+    if (!winnerModal.submissionId) return;
 
     setProcessing(true);
     setError(null);
     try {
       // 先更新投稿状态为 winner
-      await gradeSubmission(submissionId, Number(score) || 100, 'winner');
+      await gradeSubmission(winnerModal.submissionId, Number(score) || 100, 'winner');
       // 然后更新竞技场状态为 finished
       await updateArenaStatus(arenaId, 'finished');
+      setWinnerModal({ isOpen: false, submissionId: null });
       setGradingId(null);
       setScore('');
       onUpdate();
@@ -114,6 +121,69 @@ export const CreatorDashboard: React.FC<CreatorDashboardProps> = ({
         <span className="text-xs text-slate-400">共 {submissions.length} 份投稿</span>
       </div>
 
+      {/* 优胜确认弹窗 */}
+      {winnerModal.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+            onClick={() => setWinnerModal({ isOpen: false, submissionId: null })}
+          />
+          <div className="relative bg-slate-900 w-full max-w-md rounded-2xl border border-amber-500/30 shadow-2xl overflow-hidden">
+            <div className="bg-slate-950 border-b border-amber-500/30 p-4 flex justify-between items-center">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="text-amber-400" size={20} />
+                <h3 className="text-lg font-bold text-white">确认优胜</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setWinnerModal({ isOpen: false, submissionId: null })}
+                className="text-slate-500 hover:text-white transition-colors"
+              >
+                <X size={22} />
+              </button>
+            </div>
+            <div className="p-6">
+              <p className="text-slate-300 mb-4">
+                确定将该投稿设为优胜吗？
+              </p>
+              <ul className="text-slate-400 text-sm space-y-2 mb-6 list-disc list-inside">
+                <li>该投稿将被标记为"已优胜"</li>
+                <li>竞技场状态将变为"已完成"</li>
+                <li>其他用户将无法继续投稿</li>
+                <li>已提交的投稿将保留</li>
+              </ul>
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setWinnerModal({ isOpen: false, submissionId: null })}
+                  className="flex-1 px-4 py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-lg font-medium transition-colors"
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  onClick={confirmSetWinner}
+                  disabled={processing}
+                  className="flex-1 px-4 py-3 bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 disabled:from-slate-700 disabled:to-slate-700 disabled:opacity-50 text-white rounded-lg font-medium transition-all shadow-lg shadow-amber-500/20 flex items-center justify-center gap-2"
+                >
+                  {processing ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      处理中...
+                    </>
+                  ) : (
+                    <>
+                      <Trophy size={16} />
+                      确认优胜
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {error && (
         <div className="mb-4 bg-red-500/10 border border-red-500/30 text-red-400 text-sm p-3 rounded-lg">
           {error}
@@ -151,8 +221,21 @@ export const CreatorDashboard: React.FC<CreatorDashboardProps> = ({
                 className="border-b border-slate-700/50 hover:bg-slate-900/50 transition-colors"
               >
                 <td className="py-4 px-4">
-                  <div className="text-sm text-slate-300 font-mono">
-                    {formatWorkerId(sub.worker_id)}
+                  <div className="flex items-center gap-2">
+                    {sub.worker_avatar_url ? (
+                      <img
+                        src={sub.worker_avatar_url}
+                        alt="头像"
+                        className="w-8 h-8 rounded-full object-cover border border-slate-600"
+                      />
+                    ) : (
+                      <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center text-slate-400 text-xs font-medium">
+                        {sub.worker_nickname?.charAt(0).toUpperCase() || '?'}
+                      </div>
+                    )}
+                    <div className="text-sm text-slate-300 font-medium">
+                      {sub.worker_nickname || formatWorkerId(sub.worker_id)}
+                    </div>
                   </div>
                 </td>
                 <td className="py-4 px-4">

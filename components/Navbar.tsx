@@ -6,27 +6,43 @@ import {
   LayoutGrid,
   Trophy,
   Briefcase,
-  MessageSquare, 
-  ShoppingBag, 
+  MessageSquare,
+  ShoppingBag,
   User,
   LogOut // 3. 引入退出图标
 } from 'lucide-react';
+import { MessageDropdown } from './MessageDropdown';
 
 interface NavbarProps {
   currentPage: Page;
   onNavigate: (page: Page) => void;
   session: Session | null; // 4. 这里必须接收 session！
+  onOpenChat?: (chat: {
+    taskId: string;
+    taskTitle: string;
+    otherUserId: string;
+    otherUserName: string;
+    currentUserId: string;
+  }) => void;
 }
 
-export const Navbar: React.FC<NavbarProps> = ({ currentPage, onNavigate, session }) => {
+export const Navbar: React.FC<NavbarProps> = ({ currentPage, onNavigate, session, onOpenChat }) => {
   const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
   const accountMenuRef = useRef<HTMLDivElement | null>(null);
+  const [showDropdown, setShowDropdown] = useState(false);
+
+  // 当 session 变化时重置状态栏显示
+  useEffect(() => {
+    setShowDropdown(false);
+  }, [session]);
 
   const profile = useMemo(() => {
     const email = session?.user.email ?? '';
     const meta = (session?.user.user_metadata ?? {}) as Record<string, any>;
     return {
       email,
+      nickname: typeof meta.nickname === 'string' ? meta.nickname : '',
+      avatar_url: typeof meta.avatar_url === 'string' ? meta.avatar_url : '',
       contact: typeof meta.contact === 'string' ? meta.contact : '',
       role: typeof meta.role === 'string' ? meta.role : '',
       domains: Array.isArray(meta.domains) ? meta.domains.filter((d) => typeof d === 'string') : [],
@@ -50,17 +66,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPage, onNavigate, session
     onNavigate(Page.HOME);
   };
 
-  useEffect(() => {
-    if (!isAccountMenuOpen) return;
-    const onPointerDown = (e: MouseEvent) => {
-      if (!accountMenuRef.current) return;
-      if (!accountMenuRef.current.contains(e.target as Node)) {
-        setIsAccountMenuOpen(false);
-      }
-    };
-    window.addEventListener('pointerdown', onPointerDown);
-    return () => window.removeEventListener('pointerdown', onPointerDown);
-  }, [isAccountMenuOpen]);
+
 
   return (
     <nav className="sticky top-0 z-40 bg-slate-900/80 backdrop-blur-md border-b border-slate-800">
@@ -68,10 +74,11 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPage, onNavigate, session
         <div className="flex items-center justify-between h-16">
           {/* Logo */}
           <div
-            className="flex items-center gap-2 cursor-pointer"
+            className="flex items-center cursor-pointer"
             onClick={() => onNavigate(Page.HOME)}
           >
             <img src="/logo.png" alt="Logo" className="h-24 w-auto" />
+            <span className="text-white font-bold text-xl -ml-8">碳硅合创</span>
           </div>
 
           {/* Desktop Menu */}
@@ -94,31 +101,57 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPage, onNavigate, session
 
           {/* User Actions */}
           <div className="flex items-center gap-4">
+            {/* 消息通知 - 仅登录用户可见 */}
+            {session && (
+              <MessageDropdown
+                currentUserId={session.user.id}
+                onOpenChat={onOpenChat}
+              />
+            )}
+
             {/* 6. 核心修改：根据是否登录显示不同内容 */}
             {session ? (
               // === 如果已登录 (session存在) ===
-              <div className="relative flex items-center pl-2 border-l border-slate-700" ref={accountMenuRef}>
+              <div
+                className="relative flex items-center pl-2 border-l border-slate-700"
+              >
                 <button
                   type="button"
-                  onClick={() => setIsAccountMenuOpen((v) => !v)}
+                  onClick={() => onNavigate(Page.PROFILE)}
                   className="flex items-center gap-2"
                   title="我的账号"
+                  onMouseEnter={() => setShowDropdown(true)}
                 >
-                  {/* 显示用户邮箱 (大屏显示) */}
+                  {/* 显示用户昵称 (大屏显示) */}
                   <span className="text-xs text-slate-400 hidden lg:block max-w-48 truncate">
-                    {profile.email}
+                    {profile.nickname || profile.email}
                   </span>
 
-                  {/* 用户头像（登录态变色） */}
-                  <div className="w-8 h-8 rounded-full bg-cyan-900/50 text-cyan-400 border border-cyan-500/30 flex items-center justify-center font-bold text-xs select-none">
-                    {profile.email?.charAt(0).toUpperCase()}
+                  {/* 用户头像（登录态变色）- 可点击进入个人主页 */}
+                  <div
+                    className="w-8 h-8 rounded-full bg-cyan-900/50 text-cyan-400 border border-cyan-500/30 flex items-center justify-center font-bold text-xs select-none cursor-pointer hover:ring-2 hover:ring-cyan-500 transition-all overflow-hidden"
+                  >
+                    {profile.avatar_url ? (
+                      <img
+                        src={profile.avatar_url}
+                        alt="头像"
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      (profile.nickname || profile.email)?.charAt(0).toUpperCase()
+                    )}
                   </div>
                 </button>
 
-                {isAccountMenuOpen && (
-                  <div className="absolute right-0 top-12 w-72 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden">
+                {/* 悬停显示的状态栏 */}
+                {showDropdown && (
+                  <div
+                    className="absolute right-0 top-12 w-72 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden"
+                    onMouseEnter={() => setShowDropdown(true)}
+                    onMouseLeave={() => setShowDropdown(false)}
+                  >
                     <div className="px-4 py-3 border-b border-slate-800">
-                      <div className="text-sm font-semibold text-white truncate">{profile.email}</div>
+                      <div className="text-sm font-semibold text-white truncate">{profile.nickname || profile.email}</div>
                       <div className="text-xs text-slate-400 mt-1">
                         {profile.role ? `身份：${profile.role === 'carbon' ? '行业专家' : profile.role === 'silicon' ? 'AI 探索者' : profile.role}` : '身份：未填写'}
                       </div>
@@ -155,7 +188,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPage, onNavigate, session
               </div>
             ) : (
               // === 如果未登录 (session为空) ===
-              <div 
+              <div
                 onClick={() => onNavigate(Page.REGISTER)}
                 className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center cursor-pointer hover:ring-2 hover:ring-cyan-500 transition-all"
                 title="注册 / 登录"

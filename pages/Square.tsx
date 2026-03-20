@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { MessageSquare, ThumbsUp, Eye, Share2, Plus, Hash, ArrowUpRight, X, Image, Trash, Check, Copy } from 'lucide-react';
+import { MessageSquare, ThumbsUp, Eye, Share2, Plus, Hash, X, Image, Trash, Check, Copy } from 'lucide-react';
 import { supabase } from '../src/supabaseClient';
 import { Topic, HotTopic, RecommendedUser } from '../types';
 
@@ -67,7 +67,7 @@ export const Square: React.FC<SquareProps> = ({ onTopicSelect }) => {
     try {
       const { data, error } = await supabase
         .from('topics')
-        .select('id, user_id, title, content, image_url, category, tag, likes_count, comments_count, views_count, published, created_at, updated_at')
+        .select('id, user_id, user_nickname, user_avatar_url, title, content, image_url, category, tag, likes_count, comments_count, views_count, published, created_at, updated_at')
         .eq('published', true)
         .order('created_at', { ascending: false })
         .limit(50);
@@ -84,16 +84,28 @@ export const Square: React.FC<SquareProps> = ({ onTopicSelect }) => {
   const fetchHotTopics = async () => {
     try {
       const { data, error } = await supabase
-        .from('hot_topics')
-        .select('*')
-        .eq('is_active', true)
-        .order('order_index', { ascending: true })
+        .from('topics')
+        .select('id, title, views_count')
+        .eq('published', true)
+        .order('views_count', { ascending: false })
         .limit(10);
       if (error) {
         console.error('fetch hot topics error', error);
         return;
       }
-      setHotTopics((data || []) as HotTopic[]);
+      // 将 Topic 数据转换为 HotTopic 格式
+      const hotTopicsData: HotTopic[] = (data || []).map((topic: any) => ({
+        id: topic.id,
+        tag: '',
+        display_name: topic.title,
+        count: topic.views_count,
+        description: '',
+        is_active: true,
+        order_index: 0,
+        created_at: '',
+        updated_at: ''
+      }));
+      setHotTopics(hotTopicsData);
     } catch (err) {
       console.error('unexpected fetchHotTopics error', err);
     }
@@ -121,9 +133,12 @@ export const Square: React.FC<SquareProps> = ({ onTopicSelect }) => {
     const init = async () => {
       const { data } = await supabase.auth.getUser();
       setCurrentUserId(data?.user?.id || null);
-      await fetchTopics();
-      await fetchHotTopics();
-      await fetchRecommendedUsers();
+      // 并行请求，提高加载速度
+      await Promise.all([
+        fetchTopics(),
+        fetchHotTopics(),
+        fetchRecommendedUsers()
+      ]);
     };
     init();
   }, []);
@@ -151,6 +166,11 @@ export const Square: React.FC<SquareProps> = ({ onTopicSelect }) => {
       showToast('请填写标题和内容', 'error');
       return;
     }
+
+    const meta = (user.user_metadata ?? {}) as Record<string, any>;
+    const userNickname = typeof meta.nickname === 'string' ? meta.nickname : '';
+    const userAvatarUrl = typeof meta.avatar_url === 'string' ? meta.avatar_url : '';
+
     const { error } = await supabase.from('topics').insert([{
       title: form.title,
       content: form.content,
@@ -158,6 +178,8 @@ export const Square: React.FC<SquareProps> = ({ onTopicSelect }) => {
       category: form.category,
       tag: form.tag || null,
       user_id: user.id,
+      user_nickname: userNickname,
+      user_avatar_url: userAvatarUrl,
       published: true
     }]);
     if (error) {
@@ -358,11 +380,32 @@ export const Square: React.FC<SquareProps> = ({ onTopicSelect }) => {
                      <div className="flex justify-between items-start mb-4">
                         <div className="flex items-center gap-3">
                            <div className="w-10 h-10 rounded-full bg-slate-700 flex items-center justify-center overflow-hidden border border-slate-600">
-                             <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${topic.user_id}`} alt="avatar" />
+                             {topic.user_avatar_url ? (
+                               <img
+                                 src={topic.user_avatar_url}
+                                 alt="avatar"
+                                 className="w-full h-full object-cover"
+                                 loading="lazy"
+                                 onError={(e) => {
+                                   const target = e.target as HTMLImageElement;
+                                   if (!target.dataset.fallback) {
+                                     target.dataset.fallback = 'true';
+                                     target.src = `https://api.dicebear.com/7.x/avataaars/svg?seed=${topic.user_id}`;
+                                   }
+                                 }}
+                               />
+                             ) : (
+                               <img
+                                 src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${topic.user_id}`}
+                                 alt="avatar"
+                                 className="w-full h-full object-cover"
+                                 loading="lazy"
+                               />
+                             )}
                            </div>
                            <div>
                               <div className="flex items-center gap-2">
-                                <span className="text-white font-bold text-sm tracking-wide">用户</span>
+                                <span className="text-white font-bold text-sm tracking-wide">{topic.user_nickname || '用户'}</span>
                                 {topic.tag && <span className="text-[10px] bg-cyan-950/40 text-cyan-400 px-1.5 py-0.5 rounded border border-cyan-500/20 font-medium">{topic.tag}</span>}
                               </div>
                               <span className="text-xs text-slate-500">{formatTime(topic.created_at)}</span>
@@ -427,13 +470,29 @@ export const Square: React.FC<SquareProps> = ({ onTopicSelect }) => {
                    {hotTopics.length === 0 ? (
                      <li className="text-slate-500 text-sm text-center py-4">暂无热门话题</li>
                    ) : (
-                     hotTopics.map(topic => (
-                       <li key={topic.id} className="flex justify-between items-center text-sm group cursor-pointer hover:bg-slate-700/50 p-2 -mx-2 rounded-lg transition-colors">
-                        <div className="flex-1">
-                           <span className="text-slate-400 group-hover:text-white transition-colors tracking-wide">{topic.display_name}</span>
-                           <span className="ml-2 text-xs text-slate-600">{topic.count} 讨论</span>
+                     hotTopics.map((topic, index) => (
+                       <li
+                         key={topic.id}
+                         onClick={() => onTopicSelect(String(topic.id))}
+                         className="flex justify-between items-center text-sm group cursor-pointer hover:bg-slate-700/50 p-2 -mx-2 rounded-lg transition-colors"
+                       >
+                        <div className="flex items-center gap-3 flex-1 min-w-0">
+                           <span className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
+                             index === 0 ? 'bg-orange-500 text-white' :
+                             index === 1 ? 'bg-slate-400 text-white' :
+                             index === 2 ? 'bg-amber-600 text-white' :
+                             'bg-slate-700 text-slate-400'
+                           }`}>
+                             {index + 1}
+                           </span>
+                           <span className="text-slate-400 group-hover:text-white transition-colors tracking-wide truncate">
+                             {topic.display_name}
+                           </span>
                         </div>
-                        <ArrowUpRight size={14} className="text-slate-600 group-hover:text-cyan-400 flex-shrink-0 ml-2" />
+                        <div className="flex items-center gap-1 text-xs text-slate-600 flex-shrink-0">
+                           <Eye size={12} />
+                           <span>{topic.count}</span>
+                        </div>
                      </li>
                      ))
                    )}
@@ -451,9 +510,26 @@ export const Square: React.FC<SquareProps> = ({ onTopicSelect }) => {
                         <div className="flex items-center gap-3">
                            <div className="w-10 h-10 rounded-full bg-slate-700 border border-slate-600 overflow-hidden">
                              {user.avatar_url ? (
-                               <img src={user.avatar_url} alt={user.display_name} className="w-full h-full object-cover" />
+                               <img
+                                 src={user.avatar_url}
+                                 alt={user.display_name}
+                                 className="w-full h-full object-cover"
+                                 loading="lazy"
+                                 onError={(e) => {
+                                   const target = e.target as HTMLImageElement;
+                                   if (!target.dataset.fallback) {
+                                     target.dataset.fallback = 'true';
+                                     target.src = `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.user_id}`;
+                                   }
+                                 }}
+                               />
                              ) : (
-                               <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${user.user_id}`} alt={user.display_name} className="w-full h-full object-cover" />
+                               <img
+                                 src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${user.user_id}`}
+                                 alt={user.display_name}
+                                 className="w-full h-full object-cover"
+                                 loading="lazy"
+                               />
                              )}
                            </div>
                            <div>

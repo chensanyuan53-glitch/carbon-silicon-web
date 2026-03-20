@@ -5,7 +5,9 @@ export enum Page {
   TASKS = 'tasks',
   SQUARE = 'square',
   MARKET = 'market',
-  REGISTER = 'register'
+  REGISTER = 'register',
+  PROFILE = 'profile',
+  RESET_PASSWORD = 'reset-password'
 }
 
 export interface Competition {
@@ -85,6 +87,8 @@ export interface AiCategory {
 export interface Topic {
   id: number;
   user_id: string;
+  user_nickname?: string;
+  user_avatar_url?: string;
   title: string;
   content: string;
   image_url?: string;
