@@ -106,7 +106,7 @@ function App() {
 
     switch (currentPage) {
       case Page.HOME:
-        return <Home onNavigate={setCurrentPage} />;
+        return <Home onNavigate={setCurrentPage} onSetStationTab={setStationTab} />;
       case Page.STATION:
         return <Station initialTab={stationTab} />;
       case Page.ARENA:
@@ -124,7 +124,7 @@ function App() {
       case Page.RESET_PASSWORD:
         return <ResetPassword onNavigate={setCurrentPage} />;
       default:
-        return <Home onNavigate={setCurrentPage} />;
+        return <Home onNavigate={setCurrentPage} onSetStationTab={setStationTab} />;
     }
   };
 

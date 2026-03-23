@@ -5,6 +5,7 @@ import { supabase } from '../src/supabaseClient';
 
 interface HomeProps {
   onNavigate: (page: Page) => void;
+  onSetStationTab?: (tab: string) => void;
 }
 
 interface Task {
@@ -27,8 +28,9 @@ interface CarouselSlide {
   badge?: string;
 }
 
-export const Home: React.FC<HomeProps> = ({ onNavigate }) => {
-  const [latestTask, setLatestTask] = useState<Task | null>(null);
+export const Home: React.FC<HomeProps> = ({ onNavigate, onSetStationTab }) => {
+  const [latestTasks, setLatestTasks] = useState<Task[]>([]);
+  const [currentTaskIndex, setCurrentTaskIndex] = useState(0);
   const [loading, setLoading] = useState(true);
   const [currentSlide, setCurrentSlide] = useState(0);
   const [isAutoPlaying, setIsAutoPlaying] = useState(true);
@@ -75,30 +77,52 @@ export const Home: React.FC<HomeProps> = ({ onNavigate }) => {
   }, [isAutoPlaying]);
 
   useEffect(() => {
-    const fetchLatestTask = async () => {
+    const fetchLatestTasks = async () => {
       try {
         setLoading(true);
+        const now = Date.now();
+
+        // 获取最近发布的任务，限制为前 10 个，然后在前端过滤未过期的
         const { data, error } = await supabase
-          .from('tasks')
+          .from('tasks_reward')
           .select('*')
           .order('created_at', { ascending: false })
-          .limit(1)
-          .single();
+          .limit(10);
 
         if (error) {
-          console.error('Error fetching task:', error);
+          console.error('Error fetching tasks:', error);
+          setLatestTasks([]);
         } else {
-          setLatestTask(data);
+          // 过滤出未过期的任务（12小时内）
+          const activeTasks = (data || []).filter((task: any) => {
+            const createdTime = new Date(task.created_at).getTime();
+            const expireTime = createdTime + 12 * 60 * 60 * 1000; // 12小时
+            return expireTime > now && task.is_active !== false;
+          });
+
+          setLatestTasks(activeTasks);
         }
       } catch (err) {
         console.error('Error:', err);
+        setLatestTasks([]);
       } finally {
         setLoading(false);
       }
     };
 
-    fetchLatestTask();
+    fetchLatestTasks();
   }, []);
+
+  // 轮播任务索引
+  useEffect(() => {
+    if (latestTasks.length <= 1) return;
+
+    const interval = setInterval(() => {
+      setCurrentTaskIndex((prev) => (prev + 1) % latestTasks.length);
+    }, 3000); // 每3秒切换一次
+
+    return () => clearInterval(interval);
+  }, [latestTasks.length]);
   return (
     <div className="min-h-screen bg-slate-900 text-white pb-20">
       {/* Hero Section */}
@@ -187,17 +211,21 @@ export const Home: React.FC<HomeProps> = ({ onNavigate }) => {
           {/* Ticker */}
           <div className="mt-16 bg-black/40 backdrop-blur rounded-full px-6 py-2.5 border border-white/10 flex items-center gap-4 text-sm text-slate-400 shadow-xl">
             <span className="text-orange-500 font-bold whitespace-nowrap flex items-center gap-1"><Zap size={14}/> 最新需求:</span>
-            <div className="overflow-hidden h-5 w-full md:w-96 text-left">
+            <div className="overflow-hidden h-5 w-full md:w-96 text-left relative">
               {loading ? (
-                <p className="leading-5 text-slate-300">加载中...</p>
-              ) : latestTask ? (
-                <p className="animate-slide-up leading-5 text-slate-300">
-                  {latestTask.category ? `[${latestTask.category}] ` : ''}
-                  {latestTask.title || latestTask.description || '新任务'}
-                  {latestTask.reward ? `，悬赏 ¥${latestTask.reward}` : ''}
+                <p className="leading-5 text-slate-300 absolute">加载中...</p>
+              ) : latestTasks.length > 0 ? (
+                <p
+                  key={latestTasks[currentTaskIndex]?.id}
+                  className="leading-5 text-slate-300 absolute animate-slide-up"
+                >
+                  {latestTasks[currentTaskIndex]?.category ? `[${latestTasks[currentTaskIndex].category}] ` : ''}
+                  {latestTasks[currentTaskIndex]?.title || latestTasks[currentTaskIndex]?.content || '新任务'}
+                  {latestTasks[currentTaskIndex]?.reward && `，悬赏 ¥${latestTasks[currentTaskIndex].reward}`}
+                  {latestTasks.length > 1 && <span className="text-slate-500 ml-2">({currentTaskIndex + 1}/{latestTasks.length})</span>}
                 </p>
               ) : (
-                <p className="leading-5 text-slate-300">暂无最新需求</p>
+                <p className="leading-5 text-slate-300 absolute">暂无最新需求</p>
               )}
             </div>
           </div>
@@ -209,7 +237,13 @@ export const Home: React.FC<HomeProps> = ({ onNavigate }) => {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
           
           {/* Tools Card */}
-          <div className="bg-slate-800/90 backdrop-blur border border-slate-700 rounded-2xl p-8 hover:border-cyan-500/50 transition-colors cursor-pointer group shadow-2xl" onClick={() => onNavigate(Page.STATION)}>
+          <div
+            className="bg-slate-800/90 backdrop-blur border border-slate-700 rounded-2xl p-8 hover:border-cyan-500/50 transition-colors cursor-pointer group shadow-2xl"
+            onClick={() => {
+              onSetStationTab?.('learning');
+              onNavigate(Page.STATION);
+            }}
+          >
             <div className="flex justify-between items-center mb-6">
               <h3 className="text-lg font-bold text-white tracking-wide">本周热门工具</h3>
               <ArrowRight size={18} className="text-slate-500 group-hover:text-cyan-400 group-hover:translate-x-1 transition-all" />

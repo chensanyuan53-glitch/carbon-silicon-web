@@ -11,6 +11,8 @@ interface Message {
   content: string;
   is_read: boolean;
   created_at: string;
+  sender_email?: string;
+  sender_nickname?: string;
 }
 
 interface ChatDialogProps {
@@ -38,14 +40,18 @@ export const ChatDialog: React.FC<ChatDialogProps> = ({
   const [sending, setSending] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [senderEmail, setSenderEmail] = useState('');
+  const [senderNickname, setSenderNickname] = useState('');
+  const [otherUserNickname, setOtherUserNickname] = useState('');
 
-  // 获取当前用户邮箱
+  // 获取当前用户信息（邮箱和昵称）
   useEffect(() => {
     const getCurrentUser = async () => {
       try {
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
           setSenderEmail(user.email || '');
+          const meta = user.user_metadata || {};
+          setSenderNickname(meta.nickname || '');
         }
       } catch (err) {
         console.error('获取用户信息失败:', err);
@@ -53,6 +59,33 @@ export const ChatDialog: React.FC<ChatDialogProps> = ({
     };
     getCurrentUser();
   }, []);
+
+  // 从消息记录中获取对方用户昵称
+  useEffect(() => {
+    if (!otherUserId || !taskId) return;
+
+    const getOtherUserNickname = async () => {
+      try {
+        // 尝试从消息记录中获取对方用户发送的消息
+        const { data } = await supabase
+          .from('messages')
+          .select('sender_nickname, sender_email')
+          .eq('task_id', taskId)
+          .eq('sender_id', otherUserId)
+          .limit(1)
+          .single();
+
+        if (data) {
+          setOtherUserNickname(data.sender_nickname || '');
+        }
+      } catch (err) {
+        // 如果找不到消息，就保持为空，使用默认值
+        console.error('获取对方用户昵称失败:', err);
+      }
+    };
+
+    getOtherUserNickname();
+  }, [otherUserId, taskId]);
 
   // 加载消息
   useEffect(() => {
@@ -65,7 +98,7 @@ export const ChatDialog: React.FC<ChatDialogProps> = ({
           .from('messages')
           .select('*')
           .eq('task_id', taskId)
-          .or(`sender_id.eq.${currentUserId},receiver_id.eq.${currentUserId}`)
+          .or(`and(sender_id.eq.${currentUserId},receiver_id.eq.${otherUserId}),and(sender_id.eq.${otherUserId},receiver_id.eq.${currentUserId})`)
           .order('created_at', { ascending: true });
 
         if (!error && data) {
@@ -103,7 +136,7 @@ export const ChatDialog: React.FC<ChatDialogProps> = ({
     if (!isOpen || !taskId || !currentUserId) return;
 
     const channel = supabase
-      .channel(`messages:${taskId}:${currentUserId}`)
+      .channel(`messages:${taskId}:${currentUserId}:${otherUserId}`)
       .on(
         'postgres_changes',
         {
@@ -116,8 +149,8 @@ export const ChatDialog: React.FC<ChatDialogProps> = ({
           const newMsg = payload.new as Message;
           // 只显示发送给当前用户或当前用户发送的消息
           if (
-            newMsg.sender_id === currentUserId ||
-            newMsg.receiver_id === currentUserId
+            (newMsg.sender_id === currentUserId && newMsg.receiver_id === otherUserId) ||
+            (newMsg.sender_id === otherUserId && newMsg.receiver_id === currentUserId)
           ) {
             setMessages(prev => [...prev, newMsg]);
             scrollToBottom();
@@ -137,7 +170,7 @@ export const ChatDialog: React.FC<ChatDialogProps> = ({
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [isOpen, taskId, currentUserId]);
+  }, [isOpen, taskId, currentUserId, otherUserId]);
 
   const scrollToBottom = () => {
     setTimeout(() => {
@@ -155,6 +188,7 @@ export const ChatDialog: React.FC<ChatDialogProps> = ({
         sender_id: currentUserId,
         receiver_id: otherUserId,
         sender_email: senderEmail,
+        sender_nickname: senderNickname,
         task_id: taskId,
         task_title: taskTitle,
         content: newMessage.trim(),
@@ -192,7 +226,7 @@ export const ChatDialog: React.FC<ChatDialogProps> = ({
             </div>
             <div>
               <div className="text-sm font-semibold text-white">
-                {otherUserName || '对方'}
+                {otherUserName || otherUserNickname || '对方'}
               </div>
               <div className="text-xs text-slate-400 truncate max-w-[200px]">
                 任务：{taskTitle}

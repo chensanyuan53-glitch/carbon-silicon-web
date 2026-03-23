@@ -314,7 +314,7 @@ export const Profile: React.FC<ProfileProps> = ({ onNavigate }) => {
                 </div>
                 {!isEditing && (
                   <div className="text-xs text-slate-500 mt-1">
-                    💡 点击头像或"编辑资料"按钮修改个人信息
+                    💡 点击"编辑资料"按钮修改个人信息
                   </div>
                 )}
               </div>

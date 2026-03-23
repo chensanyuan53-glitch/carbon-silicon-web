@@ -12,6 +12,7 @@ interface Message {
   is_read: boolean;
   created_at: string;
   sender_email?: string;
+  sender_nickname?: string;
 }
 
 interface Notification {
@@ -223,11 +224,11 @@ export const MessageDropdown: React.FC<MessageDropdownProps> = ({ currentUserId,
 
   const handleOpenChat = (message: Message) => {
     const otherUserId = message.sender_id === currentUserId ? message.receiver_id : message.sender_id;
-    // 修复：根据消息方向正确显示对方名称
-    // 如果是发送的消息，对方是接收者；如果是接收的消息，对方是发送者
+    // 根据消息方向正确显示对方名称
+    // 优先使用昵称，如果没有昵称则使用邮箱
     const otherUserName = message.sender_id === currentUserId
       ? '接收者'
-      : (message.sender_email || '接单者');
+      : (message.sender_nickname || message.sender_email || '接单者');
 
     if (onOpenChat) {
       onOpenChat({
@@ -358,12 +359,18 @@ export const MessageDropdown: React.FC<MessageDropdownProps> = ({ currentUserId,
                     >
                       <div className="flex items-start gap-3">
                         <div className="w-10 h-10 rounded-full bg-cyan-900/50 text-cyan-400 border border-cyan-500/30 flex items-center justify-center font-bold text-xs shrink-0">
-                          {(msg.sender_id === currentUserId ? '发送至' : msg.sender_email || '?').charAt(0).toUpperCase()}
+                          {msg.sender_id === currentUserId
+                            ? '发送至'
+                            : (msg.sender_nickname || msg.sender_email || '?').charAt(0).toUpperCase()
+                          }
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center justify-between mb-1">
                             <div className="text-sm font-semibold text-white truncate">
-                              {msg.sender_id === currentUserId ? `发送至: ${msg.task_title}` : msg.sender_email || '未知用户'}
+                              {msg.sender_id === currentUserId
+                                ? `发送至: ${msg.task_title}`
+                                : (msg.sender_nickname || msg.sender_email || '未知用户')
+                              }
                             </div>
                             <div className="text-[10px] text-slate-500 shrink-0 ml-2">
                               {formatTime(msg.created_at)}

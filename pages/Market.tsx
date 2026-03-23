@@ -9,6 +9,7 @@ interface MarketProps {
 
 export const Market: React.FC<MarketProps> = ({ onProductSelect }) => {
   const [products, setProducts] = useState<MarketProduct[]>([]);
+  const [filteredProducts, setFilteredProducts] = useState<MarketProduct[]>([]);
   const [categories, setCategories] = useState<MarketCategory[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -42,6 +43,33 @@ export const Market: React.FC<MarketProps> = ({ onProductSelect }) => {
   const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info', duration = 3000) => {
     setToast({ visible: true, message, type });
     setTimeout(() => setToast({ visible: false, message: '', type }), duration);
+  };
+
+  // 模糊搜索逻辑
+  const fuzzySearch = (text: string, query: string): boolean => {
+    if (!query) return true;
+    const lowerText = text.toLowerCase();
+    const lowerQuery = query.toLowerCase();
+    return lowerText.includes(lowerQuery);
+  };
+
+  // 处理搜索输入
+  const handleSearch = (value: string) => {
+    setSearchQuery(value);
+
+    if (!value) {
+      // 清空搜索时显示全部
+      setFilteredProducts(products);
+      return;
+    }
+
+    // 搜索产品（标题、描述、标签）
+    const filteredData = products.filter(item =>
+      fuzzySearch(item.title, value) ||
+      fuzzySearch(item.description, value) ||
+      fuzzySearch(item.tags?.join(' ') || '', value)
+    );
+    setFilteredProducts(filteredData);
   };
 
   // 获取用户管理员状态
@@ -98,7 +126,9 @@ export const Market: React.FC<MarketProps> = ({ onProductSelect }) => {
         console.error('fetch products error', error);
         return;
       }
-      setProducts((data || []) as MarketProduct[]);
+      const fetchedProducts = (data || []) as MarketProduct[];
+      setProducts(fetchedProducts);
+      setFilteredProducts(fetchedProducts);
     } catch (err) {
       console.error('unexpected fetchProducts error', err);
     }
@@ -251,7 +281,7 @@ export const Market: React.FC<MarketProps> = ({ onProductSelect }) => {
                type="text"
                placeholder="搜索工作流、AI Agent、SOP..."
                value={searchQuery}
-               onChange={(e) => setSearchQuery(e.target.value)}
+               onChange={(e) => handleSearch(e.target.value)}
                className="w-full bg-slate-800 border border-slate-700 rounded-full py-4 px-8 text-white text-lg focus:outline-none focus:border-cyan-500 shadow-2xl transition-all"
              />
              <button className="absolute right-2.5 top-2.5 bg-cyan-600 hover:bg-cyan-500 text-white p-2.5 rounded-full transition-colors shadow-lg">
@@ -336,13 +366,22 @@ export const Market: React.FC<MarketProps> = ({ onProductSelect }) => {
         </div>
 
         {/* Product Grid */}
-        {products.length === 0 ? (
+        {filteredProducts.length === 0 ? (
           <div className="bg-slate-800/80 rounded-2xl p-12 border border-slate-700 text-center mb-16">
-             <p className="text-slate-400 text-lg">暂无商品，快来上传第一个商品吧！</p>
+             <ShoppingBag size={48} className="mx-auto text-slate-600 mb-4" />
+             <p className="text-slate-400 text-lg mb-2">
+               {searchQuery ? '未找到相关Agent' : '暂无Agent'}
+             </p>
+             {searchQuery && (
+               <p className="text-slate-500 text-sm">试试其他关键词</p>
+             )}
+             {!searchQuery && products.length > 0 && (
+               <p className="text-slate-500 text-sm mt-2">当前分类下暂无Agent</p>
+             )}
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8 mb-16">
-             {products.map(product => (
+             {filteredProducts.map(product => (
                <div
                  key={product.id}
                  onClick={() => onProductSelect && onProductSelect(String(product.id))}
@@ -413,20 +452,20 @@ export const Market: React.FC<MarketProps> = ({ onProductSelect }) => {
               </div>
               <div className="space-y-4">
                 <div>
-                  <label className="text-sm text-slate-300">商品标题（必填）</label>
+                  <label className="text-sm text-slate-300">Agent标题（必填）</label>
                   <input
                     value={uploadForm.title}
                     onChange={(e) => setUploadForm({ ...uploadForm, title: e.target.value })}
-                    placeholder="输入商品标题"
+                    placeholder="输入Agent标题"
                     className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 mt-2 text-sm text-white focus:outline-none focus:border-cyan-500"
                   />
                 </div>
                 <div>
-                  <label className="text-sm text-slate-300">商品描述（必填）</label>
+                  <label className="text-sm text-slate-300">Agent描述（必填）</label>
                   <textarea
                     value={uploadForm.description}
                     onChange={(e) => setUploadForm({ ...uploadForm, description: e.target.value })}
-                    placeholder="详细描述商品的功能、特点和使用场景..."
+                    placeholder="详细描述Agent的功能、特点和使用场景..."
                     rows={4}
                     className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 mt-2 text-sm text-white focus:outline-none focus:border-cyan-500"
                   />
