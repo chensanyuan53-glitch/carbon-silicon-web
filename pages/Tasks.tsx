@@ -3,6 +3,11 @@ import { supabase } from '../src/supabaseClient';
 import {
   Plus, Clock, Home, X, Upload, Trash2, Smartphone, MessageCircle, ChevronDown, CheckCircle2, AlertCircle, EyeOff, AlertTriangle, RefreshCw
 } from 'lucide-react';
+import {
+  createGroupChat,
+  getExistingGroupChat,
+  getUserNickname
+} from '../src/botService';
 
 // --- 类型定义 ---
 type TaskType = 'bounty' | 'team';
@@ -21,6 +26,11 @@ interface TaskItem {
   user_id: string;
   isOwner?: boolean;
   isActive?: boolean;
+  // 完成确认相关字段
+  confirmedByClaimant?: boolean;
+  confirmedByPublisher?: boolean;
+  completedAt?: string;
+  isCompleted?: boolean;
 }
 
 // --- 倒计时计算工具函数 ---
@@ -46,9 +56,14 @@ interface TasksProps {
     otherUserName: string;
     currentUserId: string;
   }) => void;
+  onOpenGroupChat?: (chat: {
+    taskId: string;
+    taskTitle: string;
+    currentUserId: string;
+  }) => void;
 }
 
-export const Tasks: React.FC<TasksProps> = ({ onOpenChat }) => {
+export const Tasks: React.FC<TasksProps> = ({ onOpenChat, onOpenGroupChat }) => {
   // --- 状态管理 ---
   const [tasks, setTasks] = useState<TaskItem[]>([]);
   const [tasksLoading, setTasksLoading] = useState(true);
@@ -88,7 +103,7 @@ export const Tasks: React.FC<TasksProps> = ({ onOpenChat }) => {
     isOpen: boolean;
     title: string;
     desc: string;
-    actionType: 'delete' | 'off' | 'renew' | 'claim';
+    actionType: 'delete' | 'off' | 'renew' | 'claim' | 'confirm_completion' | 'confirm_publisher';
     taskId: string;
   }>({ isOpen: false, title: '', desc: '', actionType: 'off', taskId: '' });
 
@@ -111,6 +126,27 @@ export const Tasks: React.FC<TasksProps> = ({ onOpenChat }) => {
     return () => clearInterval(timer);
   }, []);
 
+  // --- 1.5 处理从通知跳转来的任务完成确认请求 ---
+  useEffect(() => {
+    const pendingTaskId = localStorage.getItem('pendingCompletionTaskId');
+    if (pendingTaskId) {
+      // 清除存储的任务ID
+      localStorage.removeItem('pendingCompletionTaskId');
+
+      // 切换到"我的发布"标签
+      setFilterType('mine');
+      setPersonalTab('posted');
+
+      // 等待任务加载完成后，弹出确认框
+      setTimeout(() => {
+        const task = tasks.find(t => t.id === pendingTaskId);
+        if (task && task.isOwner && task.confirmedByClaimant && !task.confirmedByPublisher) {
+          handlePublisherConfirmCompletion(task);
+        }
+      }, 1000);
+    }
+  }, [tasks]);
+
   // --- 2. 获取数据逻辑 ---
   const fetchTasks = useCallback(async () => {
     setTasksLoading(true);
@@ -129,7 +165,7 @@ export const Tasks: React.FC<TasksProps> = ({ onOpenChat }) => {
 
       if (!error && data) {
         const now = new Date().getTime();
-        const formatted: TaskItem[] = data.map((row: Record<string, unknown> & { created_at?: string | Date }) => {
+        const formatted = data.map((row: Record<string, unknown> & { created_at?: string | Date }) => {
           // 规范 created_at：若无时区信息则假定为 UTC 并追加 'Z'，若是 Date 对象则转为 ISO
           let createdIso: string;
           const raw = row.created_at;
@@ -158,13 +194,20 @@ export const Tasks: React.FC<TasksProps> = ({ onOpenChat }) => {
             contact: String(row.contact ?? ''),
             user_id: String(row.user_id ?? ''),
             isOwner: user?.id === row.user_id,
-            isActive: row.is_active !== false
+            isActive: row.is_active !== false,
+            confirmedByClaimant: row.confirmed_by_claimant || false,
+            confirmedByPublisher: row.confirmed_by_publisher || false,
+            completedAt: row.completed_at ? new Date(row.completed_at as string).toLocaleString('zh-CN') : undefined,
+            isCompleted: row.completed || false
           };
         });
 
-        // 过滤逻辑：在大厅里，非本人的任务如果过期就不显示
+        // 过滤逻辑：
+        // 只过滤掉真正过期的非本人任务（12小时前创建的）
+        // 下架的任务仍然保留，在渲染时根据当前标签决定是否显示
         let filteredByExpiry = formatted.filter(t => {
           const isExpired = new Date(t.createdAt).getTime() + 12 * 60 * 60 * 1000 < now;
+          // 过期的非本人任务不显示
           return t.isOwner || !isExpired;
         });
 
@@ -193,9 +236,7 @@ export const Tasks: React.FC<TasksProps> = ({ onOpenChat }) => {
               }
             });
         }
-        if (process.env.NODE_ENV !== 'production') {
-          console.log('DEBUG: displayed tasks after filters:', filteredByExpiry.map(t => ({ id: t.id, reward: t.rewardValue, isOwner: t.isOwner })));
-        }
+
       }
     } catch (err) { console.error(err); }
     setTasksLoading(false);
@@ -273,6 +314,12 @@ export const Tasks: React.FC<TasksProps> = ({ onOpenChat }) => {
       if (actionType === 'claim') {
         // 接单确认：直接调用 confirmClaim
         await confirmClaim();
+      } else if (actionType === 'confirm_completion') {
+        // 接单者确认完成
+        await executeClaimantConfirmation(taskId);
+      } else if (actionType === 'confirm_publisher') {
+        // 发布者确认完成
+        await executePublisherConfirmation(taskId);
       } else if (actionType === 'renew') {
         await executeRenew(taskId);
       } else if (actionType === 'delete') {
@@ -300,15 +347,20 @@ export const Tasks: React.FC<TasksProps> = ({ onOpenChat }) => {
           try { localStorage.setItem('hiddenDeletedTaskIds', JSON.stringify(hiddenDeletedRef.current)); } catch (e) { /* ignore */ }
           setHiddenTaskIds([...hiddenDeletedRef.current]);
           setTasks(prev => prev.filter(t => t.id !== taskId));
-          showNotice('已从视图移除该任务，但数据库未被永久删除（请检查 RLS 或使用服务端删除）。', 'success');
+          showNotice('删除成功！任务已移除。', 'success');
           setConfirmConfig(prev => ({ ...prev, isOpen: false }));
           return;
         }
-        showNotice('任务已永久删除');
+
+        // 删除成功：更新本地状态
+        setTasks(prev => prev.filter(t => t.id !== taskId));
+        showNotice('任务及其接单记录已删除', 'success');
+        setConfirmConfig(prev => ({ ...prev, isOpen: false }));
+        fetchTasks();
       } else {
         const { error } = await supabase.from('tasks_reward').update({ is_active: false }).eq('id', taskId);
         if (error) throw error;
-        showNotice('任务已成功下架');
+        showNotice('任务已下架');
       }
       setConfirmConfig(prev => ({ ...prev, isOpen: false }));
       fetchTasks();
@@ -391,18 +443,48 @@ export const Tasks: React.FC<TasksProps> = ({ onOpenChat }) => {
       const { error: insertErr } = await supabase.from('task_claims').insert([{ claimant_id: user.id, task_id: pendingClaimTask.id, claimed_at: new Date().toISOString() }]);
       if (insertErr) throw insertErr;
 
-      showNotice('接单成功，请及时与发布者联系', 'success');
+      // 创建群聊
+      try {
+        // 检查是否已存在群聊
+        const existingGroupId = await getExistingGroupChat(pendingClaimTask.id);
+
+        if (existingGroupId) {
+
+        } else {
+          // 获取发布者昵称
+          const publisherNickname = await getUserNickname(pendingClaimTask.user_id);
+
+          // 获取接单者昵称
+          const meta = user.user_metadata || {};
+          const acceptorNickname = meta.nickname || user.email || '接单者';
+
+          // 创建群聊并添加成员
+          await createGroupChat(
+            pendingClaimTask.id,
+            pendingClaimTask.title,
+            pendingClaimTask.user_id,
+            publisherNickname,
+            user.id,
+            acceptorNickname
+          );
+
+
+        }
+      } catch (botError) {
+        console.error('创建群聊失败，但不影响接单流程:', botError);
+        // 群聊创建失败不影响接单成功
+      }
+
+      showNotice('接单成功，群聊已创建', 'success');
       setPendingClaimTask(null);
       setConfirmConfig(prev => ({ ...prev, isOpen: false }));
 
-      // 打开聊天对话框
-      if (onOpenChat) {
-        onOpenChat({
+      // 打开群聊对话框
+      if (onOpenGroupChat) {
+        onOpenGroupChat({
           taskId: pendingClaimTask.id,
           taskTitle: pendingClaimTask.title,
-          otherUserId: pendingClaimTask.user_id,
-          otherUserName: '发布者',
-          currentUserId: currentUserId
+          currentUserId: user.id
         });
       }
 
@@ -411,6 +493,106 @@ export const Tasks: React.FC<TasksProps> = ({ onOpenChat }) => {
       showNotice(err instanceof Error ? err.message : '确认接单失败', 'error');
     } finally {
       setConfirmingClaim(false);
+    }
+  };
+
+  // 接单者确认完成任务
+  const handleClaimantConfirmCompletion = (task: TaskItem) => {
+    setConfirmConfig({
+      isOpen: true,
+      taskId: task.id,
+      actionType: 'confirm_completion',
+      title: '确认任务完成',
+      desc: '确认完成后，将通知发布者进行确认。请确保任务确实已完成。'
+    });
+  };
+
+  // 发布者确认任务完成
+  const handlePublisherConfirmCompletion = (task: TaskItem) => {
+    setConfirmConfig({
+      isOpen: true,
+      taskId: task.id,
+      actionType: 'confirm_publisher',
+      title: '确认任务完成',
+      desc: '确认完成后，任务将被标记为已完成。请确保检查任务完成情况。'
+    });
+  };
+
+  // 执行接单者确认完成
+  const executeClaimantConfirmation = async (taskId: string) => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) { showNotice('请先登录', 'error'); return; }
+
+      // 更新接单记录中的确认状态
+      const { error: updateError } = await supabase
+        .from('task_claims')
+        .update({
+          claimant_confirmed: true,
+          claimant_confirmed_at: new Date().toISOString()
+        })
+        .eq('task_id', taskId)
+        .eq('claimant_id', user.id);
+
+      if (updateError) throw updateError;
+
+      showNotice('已通知发布者确认完成', 'success');
+      fetchTasks();
+    } catch (err: unknown) {
+      showNotice(err instanceof Error ? err.message : '确认完成失败', 'error');
+    }
+  };
+
+  // 执行发布者确认完成
+  const executePublisherConfirmation = async (taskId: string) => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) { showNotice('请先登录', 'error'); return; }
+
+      // 获取接单者ID
+      const { data: claims, error: queryError } = await supabase
+        .from('task_claims')
+        .select('claimant_id')
+        .eq('task_id', taskId)
+        .order('claimed_at', { ascending: false })
+        .limit(1);
+
+      if (queryError) throw queryError;
+      if (!claims || claims.length === 0) {
+        showNotice('未找到接单记录', 'error');
+        return;
+      }
+
+      const claimantId = claims[0].claimant_id;
+
+      // 更新接单记录中的发布者确认状态
+      const { error: updateError } = await supabase
+        .from('task_claims')
+        .update({
+          publisher_confirmed: true,
+          publisher_confirmed_at: new Date().toISOString()
+        })
+        .eq('task_id', taskId);
+
+      if (updateError) throw updateError;
+
+      // 手动更新 tasks_reward 表的完成状态（不依赖触发器）
+      const { error: taskUpdateError } = await supabase
+        .from('tasks_reward')
+        .update({
+          confirmed_by_publisher: true,
+          completed: true,
+          completed_at: new Date().toISOString(),
+          completed_by_user_id: user.id
+        })
+        .eq('id', taskId);
+
+      if (taskUpdateError) throw taskUpdateError;
+
+      showNotice('任务已完成！', 'success');
+      fetchTasks();
+    } catch (err: unknown) {
+      showNotice(err instanceof Error ? err.message : '确认完成失败', 'error');
     }
   };
 
@@ -479,10 +661,15 @@ export const Tasks: React.FC<TasksProps> = ({ onOpenChat }) => {
   let displayedTasks = filteredTasks;
   if (filterType === 'mine') {
     if (personalTab === 'posted') {
+      // 我发布的：显示所有自己的任务（包括下架的）
       displayedTasks = tasks.filter(t => t.isOwner && (filterDomain === 'all' || t.domain === filterDomain));
     } else {
+      // 我的接单：显示接单的任务
       displayedTasks = tasks.filter(t => claimedTaskIds.includes(t.id) && (filterDomain === 'all' || t.domain === filterDomain));
     }
+  } else if (filterType === 'all') {
+    // 任务大厅：不显示下架的任务
+    displayedTasks = tasks.filter(t => t.isActive);
   }
 
   return (
@@ -582,6 +769,8 @@ export const Tasks: React.FC<TasksProps> = ({ onOpenChat }) => {
                   <div className="flex justify-between items-start mb-4">
                     <div className="flex flex-col gap-2">
                       <span className={`text-[10px] px-2 py-0.5 rounded border self-start ${task.type === 'bounty' ? 'text-yellow-500 border-yellow-500/20 bg-yellow-500/5' : 'text-orange-500 border-orange-500/20 bg-orange-500/5'}`}>{task.type === 'bounty' ? '💰 悬赏急单' : '🤝 组队合伙'}</span>
+                      {task.isCompleted && <span className="text-[10px] text-green-500 font-bold bg-green-500/10 px-2 py-0.5 rounded">✓ 已完成</span>}
+                      {!task.isCompleted && task.confirmedByClaimant && <span className="text-[10px] text-blue-500 font-bold bg-blue-500/10 px-2 py-0.5 rounded">● 等待发布者确认</span>}
                       {isExpired && <span className="text-[10px] text-red-500 font-bold bg-red-500/10 px-2 py-0.5 rounded">● 任务已过期（大厅不可见）</span>}
                       {isInactive && <span className="text-[10px] text-slate-400 font-bold bg-slate-700/10 px-2 py-0.5 rounded">● 未上架</span>}
                     </div>
@@ -618,6 +807,11 @@ export const Tasks: React.FC<TasksProps> = ({ onOpenChat }) => {
                     <div className="flex items-center gap-4">
                       {task.isOwner ? (
                         <div className="flex gap-3">
+                          {task.confirmedByClaimant && !task.confirmedByPublisher && (
+                            <button onClick={() => handlePublisherConfirmCompletion(task)} className="text-blue-500 text-xs font-bold hover:bg-blue-500/10 p-2 rounded-lg flex items-center gap-1 border border-blue-500/30 transition-all">
+                              <CheckCircle2 size={14} /> 确认完成
+                            </button>
+                          )}
                           {!task.isActive ? (
                             <button onClick={() => handlePublish(task.id)} className="text-green-500 text-xs font-bold hover:bg-green-500/10 p-2 rounded-lg flex items-center gap-1 border border-green-500/30 transition-all">上架</button>
                           ) : isExpired ? (
@@ -628,7 +822,15 @@ export const Tasks: React.FC<TasksProps> = ({ onOpenChat }) => {
                           <button onClick={() => triggerConfirm(task.id, 'delete')} className="text-slate-500 text-xs font-bold hover:text-red-500 flex items-center gap-1"><Trash2 size={14} /> 删除</button>
                         </div>
                       ) : (
-                        <button disabled={isExpired || isInactive} onClick={() => handleClaim(task)} className={`text-sm font-bold ${isExpired || isInactive ? 'text-slate-600 cursor-not-allowed' : 'text-orange-500 hover:underline'}`}>立即接单</button>
+                        <>
+                          {filterType === 'mine' && personalTab === 'claimed' && !task.confirmedByClaimant ? (
+                            <button onClick={() => handleClaimantConfirmCompletion(task)} className="text-green-500 text-xs font-bold hover:bg-green-500/10 p-2 rounded-lg flex items-center gap-1 border border-green-500/30 transition-all">
+                              <CheckCircle2 size={14} /> 确认完成
+                            </button>
+                          ) : !task.isCompleted && (
+                            <button disabled={isExpired || isInactive} onClick={() => handleClaim(task)} className={`text-sm font-bold ${isExpired || isInactive ? 'text-slate-600 cursor-not-allowed' : 'text-orange-500 hover:underline'}`}>立即接单</button>
+                          )}
+                        </>
                       )}
                     </div>
                   </div>

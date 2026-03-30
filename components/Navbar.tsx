@@ -24,9 +24,15 @@ interface NavbarProps {
     otherUserName: string;
     currentUserId: string;
   }) => void;
+  onOpenGroupChat?: (chat: {
+    taskId: string;
+    taskTitle: string;
+    currentUserId: string;
+  }) => void;
+  onTaskCompletionRequest?: (taskId: string) => void;
 }
 
-export const Navbar: React.FC<NavbarProps> = ({ currentPage, onNavigate, session, onOpenChat }) => {
+export const Navbar: React.FC<NavbarProps> = ({ currentPage, onNavigate, session, onOpenChat, onOpenGroupChat, onTaskCompletionRequest }) => {
   const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
   const accountMenuRef = useRef<HTMLDivElement | null>(null);
   const [showDropdown, setShowDropdown] = useState(false);
@@ -106,6 +112,8 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPage, onNavigate, session
               <MessageDropdown
                 currentUserId={session.user.id}
                 onOpenChat={onOpenChat}
+                onOpenGroupChat={onOpenGroupChat}
+                onTaskCompletionRequest={onTaskCompletionRequest}
               />
             )}
 

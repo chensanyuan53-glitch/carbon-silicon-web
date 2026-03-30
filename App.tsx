@@ -15,14 +15,23 @@ import { MarketDetail } from './pages/MarketDetail';
 import { Register } from './pages/Register';
 import { Profile } from './pages/Profile';
 import { ResetPassword } from './pages/ResetPassword';
+import { ProgressReminders } from './pages/ProgressReminders';
 import { AIChat } from './components/AIChat';
 import { ChatDialog } from './components/ChatDialog';
+import { GroupChatDialog } from './components/GroupChatDialog';
+import { startScheduler } from './src/schedulerService';
 
 interface ChatTask {
   taskId: string;
   taskTitle: string;
   otherUserId: string;
   otherUserName: string;
+  currentUserId: string;
+}
+
+interface GroupChatTask {
+  taskId: string;
+  taskTitle: string;
   currentUserId: string;
 }
 
@@ -33,6 +42,7 @@ function App() {
   // 3. 新增：用来存储当前登录的用户信息
   const [session, setSession] = useState<Session | null>(null);
   const [chatDialog, setChatDialog] = useState<{ isOpen: boolean; chat: ChatTask | null }>({ isOpen: false, chat: null });
+  const [groupChatDialog, setGroupChatDialog] = useState<{ isOpen: boolean; chat: GroupChatTask | null }>({ isOpen: false, chat: null });
   const [stationTab, setStationTab] = useState<string | null>(null);
 
   // 4. 新增：核心逻辑！监听登录状态变化
@@ -112,7 +122,12 @@ function App() {
       case Page.ARENA:
         return <Arena />;
       case Page.TASKS:
-        return <Tasks onOpenChat={(chat) => setChatDialog({ isOpen: true, chat })} />;
+        return (
+          <Tasks
+            onOpenChat={(chat) => setChatDialog({ isOpen: true, chat })}
+            onOpenGroupChat={(chat) => setGroupChatDialog({ isOpen: true, chat })}
+          />
+        );
       case Page.SQUARE:
         return <Square onTopicSelect={setSelectedTopicId} />;
       case Page.MARKET:
@@ -123,6 +138,8 @@ function App() {
         return <Profile onNavigate={setCurrentPage} />;
       case Page.RESET_PASSWORD:
         return <ResetPassword onNavigate={setCurrentPage} />;
+      case Page.PROGRESS_REMINDERS:
+        return <ProgressReminders />;
       default:
         return <Home onNavigate={setCurrentPage} onSetStationTab={setStationTab} />;
     }
@@ -130,6 +147,19 @@ function App() {
 
   const handleOpenChat = (chat: ChatTask) => {
     setChatDialog({ isOpen: true, chat });
+  };
+
+  const handleOpenGroupChat = (chat: GroupChatTask) => {
+    setGroupChatDialog({ isOpen: true, chat });
+  };
+
+  // 处理任务完成确认请求（发布者收到接单者确认完成的通知）
+  const handleTaskCompletionRequest = (taskId: string) => {
+    // 切换到任务页面，并跳转到个人中心的"我的发布"
+    setCurrentPage(Page.TASKS);
+    // 注意：这里需要在 Tasks 组件中实现相应的逻辑来处理这个请求
+    // 可以通过 localStorage 或者全局状态来传递需要处理的任务ID
+    localStorage.setItem('pendingCompletionTaskId', taskId);
   };
 
   return (
@@ -140,6 +170,8 @@ function App() {
         onNavigate={setCurrentPage}
         session={session}
         onOpenChat={handleOpenChat}
+        onOpenGroupChat={handleOpenGroupChat}
+        onTaskCompletionRequest={handleTaskCompletionRequest}
       />
 
       <main>
@@ -159,6 +191,16 @@ function App() {
           otherUserId={chatDialog.chat.otherUserId}
           otherUserName={chatDialog.chat.otherUserName}
           currentUserId={chatDialog.chat.currentUserId}
+        />
+      )}
+
+      {/* Group Chat Dialog - 群聊对话框 */}
+      {groupChatDialog.isOpen && groupChatDialog.chat && (
+        <GroupChatDialog
+          isOpen={groupChatDialog.isOpen}
+          onClose={() => setGroupChatDialog({ isOpen: false, chat: null })}
+          taskId={groupChatDialog.chat.taskId}
+          currentUserId={groupChatDialog.chat.currentUserId}
         />
       )}
 
@@ -195,6 +237,7 @@ function App() {
               <li><a href="#" className="hover:text-white">关于我们</a></li>
               <li><a href="#" className="hover:text-white">商业合作</a></li>
               <li><a href="#" className="hover:text-white">意见反馈</a></li>
+              <li><button onClick={() => setCurrentPage(Page.PROGRESS_REMINDERS)} className="hover:text-white">进度提醒管理</button></li>
             </ul>
           </div>
         </div>

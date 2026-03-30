@@ -7,7 +7,8 @@ export enum Page {
   MARKET = 'market',
   REGISTER = 'register',
   PROFILE = 'profile',
-  RESET_PASSWORD = 'reset-password'
+  RESET_PASSWORD = 'reset-password',
+  PROGRESS_REMINDERS = 'progress-reminders'
 }
 
 export interface Competition {

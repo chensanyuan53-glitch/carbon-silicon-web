@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { supabase } from '../src/supabaseClient';
-import { Bell, X, User, MessageCircle, Check, XCircle } from 'lucide-react';
+import { Bell, X, User, MessageCircle, Check, XCircle, Users } from 'lucide-react';
 
 interface Message {
   id: number;
@@ -13,6 +13,8 @@ interface Message {
   created_at: string;
   sender_email?: string;
   sender_nickname?: string;
+  is_group_chat?: boolean;
+  group_id?: number;
 }
 
 interface Notification {
@@ -35,9 +37,15 @@ interface MessageDropdownProps {
     otherUserName: string;
     currentUserId: string;
   }) => void;
+  onOpenGroupChat?: (chat: {
+    taskId: string;
+    taskTitle: string;
+    currentUserId: string;
+  }) => void;
+  onTaskCompletionRequest?: (taskId: string) => void;
 }
 
-export const MessageDropdown: React.FC<MessageDropdownProps> = ({ currentUserId, onOpenChat }) => {
+export const MessageDropdown: React.FC<MessageDropdownProps> = ({ currentUserId, onOpenChat, onOpenGroupChat, onTaskCompletionRequest }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'messages' | 'notifications'>('messages');
   const [unreadCount, setUnreadCount] = useState(0);
@@ -49,7 +57,7 @@ export const MessageDropdown: React.FC<MessageDropdownProps> = ({ currentUserId,
   useEffect(() => {
     const loadUnreadCount = async () => {
       try {
-        // 加载未读消息数量
+        // 加载未读私聊消息数量
         const { count: msgCount, error: msgError } = await supabase
           .from('messages')
           .select('*', { count: 'exact', head: true })
@@ -63,11 +71,35 @@ export const MessageDropdown: React.FC<MessageDropdownProps> = ({ currentUserId,
           .eq('user_id', currentUserId)
           .eq('is_read', false);
 
+        // 加载群聊未读消息数量
+        // 获取用户参与的所有群聊
+        const { data: memberGroups } = await supabase
+          .from('group_members')
+          .select('group_id')
+          .eq('user_id', currentUserId);
+
+        let groupMsgCount = 0;
+        if (memberGroups && memberGroups.length > 0) {
+          const groupIds = memberGroups.map(m => m.group_id);
+
+          // 统计这些群聊中未读且不是自己发送的消息
+          const { count, error } = await supabase
+            .from('group_messages')
+            .select('*', { count: 'exact', head: true })
+            .in('group_id', groupIds)
+            .eq('is_read', false)
+            .neq('sender_id', currentUserId);
+
+          if (!error) {
+            groupMsgCount = count || 0;
+          }
+        }
+
         if (!msgError && !notifError) {
-          setUnreadCount((msgCount || 0) + (notifCount || 0));
+          setUnreadCount((msgCount || 0) + (notifCount || 0) + groupMsgCount);
         }
       } catch (err) {
-        console.error('加载未读数量失败:', err);
+        // 忽略加载错误
       }
     };
 
@@ -131,9 +163,37 @@ export const MessageDropdown: React.FC<MessageDropdownProps> = ({ currentUserId,
       )
       .subscribe();
 
+    // 实时监听群聊消息
+    const groupMsgChannel = supabase
+      .channel('group_messages:notification')
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'group_messages'
+        },
+        () => {
+          loadUnreadCount();
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'group_messages'
+        },
+        () => {
+          loadUnreadCount();
+        }
+      )
+      .subscribe();
+
     return () => {
       supabase.removeChannel(msgChannel);
       supabase.removeChannel(notifChannel);
+      supabase.removeChannel(groupMsgChannel);
     };
   }, [currentUserId]);
 
@@ -143,7 +203,7 @@ export const MessageDropdown: React.FC<MessageDropdownProps> = ({ currentUserId,
 
     const loadMessages = async () => {
       try {
-        // 获取接收的消息
+        // 获取接收的私聊消息
         const { data: receivedData, error: receivedError } = await supabase
           .from('messages')
           .select('*')
@@ -151,7 +211,7 @@ export const MessageDropdown: React.FC<MessageDropdownProps> = ({ currentUserId,
           .order('created_at', { ascending: false })
           .limit(20);
 
-        // 获取发送的消息
+        // 获取发送的私聊消息
         const { data: sentData, error: sentError } = await supabase
           .from('messages')
           .select('*')
@@ -159,13 +219,74 @@ export const MessageDropdown: React.FC<MessageDropdownProps> = ({ currentUserId,
           .order('created_at', { ascending: false })
           .limit(20);
 
+        // 获取群聊消息
+        // 先获取用户参与的所有群聊
+        const { data: memberGroups } = await supabase
+          .from('group_members')
+          .select('group_id')
+          .eq('user_id', currentUserId);
+
+        let groupMessages = [];
+        if (memberGroups && memberGroups.length > 0) {
+          const groupIds = memberGroups.map(m => m.group_id);
+          // 获取这些群聊的最新消息
+          const { data: groupMsgs } = await supabase
+            .from('group_messages')
+            .select('*, group_chats!inner(task_id, title)')
+            .in('group_id', groupIds)
+            .order('created_at', { ascending: false })
+            .limit(20);
+
+          if (groupMsgs) {
+            // 转换为消息格式，兼容现有UI
+            groupMessages = groupMsgs.map(msg => ({
+              id: msg.id,
+              sender_id: msg.sender_id,
+              receiver_id: '', // 群聊没有接收者
+              task_id: msg.group_chats?.task_id || '',
+              task_title: msg.group_chats?.title || '群聊',
+              content: msg.content,
+              is_read: msg.is_read,
+              created_at: msg.created_at,
+              sender_nickname: msg.sender_nickname,
+              is_group_chat: true, // 标记为群聊
+              group_id: msg.group_id
+            }));
+          }
+        }
+
         if (!receivedError && !sentError) {
-          const allMessages = [...(receivedData || []), ...(sentData || [])];
-          // 按时间排序并去重（每个对话只显示最新一条）
+          const privateMessages = [...(receivedData || []), ...(sentData || [])];
+
+          // 收集所有有群聊的任务ID
+          const tasksWithGroupChat = new Set<string>();
+          groupMessages.forEach(msg => {
+            if (msg.task_id) {
+              tasksWithGroupChat.add(msg.task_id);
+            }
+          });
+
+          // 过滤掉有群聊的私聊消息
+          const filteredPrivateMessages = privateMessages.filter(msg =>
+            !tasksWithGroupChat.has(msg.task_id)
+          );
+
+          // 合并私聊和群聊消息
+          const allMessages = [...filteredPrivateMessages, ...groupMessages];
+
+          // 按时间排序并去重
           const chatMap = new Map();
           allMessages.forEach(msg => {
-            const otherUserId = msg.sender_id === currentUserId ? msg.receiver_id : msg.sender_id;
-            const key = `${msg.task_id}_${otherUserId}`;
+            // 对于群聊，使用 group_id 作为唯一标识
+            // 对于私聊，使用 task_id + otherUserId 作为唯一标识
+            let key;
+            if ((msg as any).is_group_chat) {
+              key = `group_${(msg as any).group_id}`;
+            } else {
+              const otherUserId = msg.sender_id === currentUserId ? msg.receiver_id : msg.sender_id;
+              key = `${msg.task_id}_${otherUserId}`;
+            }
+
             if (!chatMap.has(key) || new Date(msg.created_at) > new Date(chatMap.get(key).created_at)) {
               chatMap.set(key, msg);
             }
@@ -174,11 +295,45 @@ export const MessageDropdown: React.FC<MessageDropdownProps> = ({ currentUserId,
           setMessages([...chatMap.values()]);
         }
       } catch (err) {
-        console.error('加载消息列表失败:', err);
+        // 忽略加载错误
       }
     };
 
     loadMessages();
+
+    // 实时监听私聊消息
+    const privateChannel = supabase
+      .channel('messages:list')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'messages',
+          filter: `or(receiver_id.eq.${currentUserId},sender_id.eq.${currentUserId})`
+        },
+        () => loadMessages()
+      )
+      .subscribe();
+
+    // 实时监听群聊消息
+    const groupChannel = supabase
+      .channel('group_messages:list')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'group_messages'
+        },
+        () => loadMessages()
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(privateChannel);
+      supabase.removeChannel(groupChannel);
+    };
   }, [isOpen, activeTab, currentUserId]);
 
   // 加载通知列表
@@ -198,7 +353,7 @@ export const MessageDropdown: React.FC<MessageDropdownProps> = ({ currentUserId,
           setNotifications(data || []);
         }
       } catch (err) {
-        console.error('加载通知失败:', err);
+        // 忽略加载错误
       }
     };
 
@@ -222,10 +377,42 @@ export const MessageDropdown: React.FC<MessageDropdownProps> = ({ currentUserId,
     };
   }, [isOpen]);
 
-  const handleOpenChat = (message: Message) => {
+  const handleOpenChat = async (message: Message) => {
+    // 如果是群聊消息，直接打开群聊
+    if (message.is_group_chat && onOpenGroupChat) {
+      onOpenGroupChat({
+        taskId: message.task_id,
+        taskTitle: message.task_title || '未知任务',
+        currentUserId: currentUserId
+      });
+      setIsOpen(false);
+      return;
+    }
+
+    // 如果是私聊消息，先检查是否有群聊
+    try {
+      const { data: groupChat } = await supabase
+        .from('group_chats')
+        .select('*')
+        .eq('task_id', message.task_id)
+        .single();
+
+      // 如果有群聊，打开群聊
+      if (groupChat && onOpenGroupChat) {
+        onOpenGroupChat({
+          taskId: message.task_id,
+          taskTitle: message.task_title || '未知任务',
+          currentUserId: currentUserId
+        });
+        setIsOpen(false);
+        return;
+      }
+    } catch (err) {
+      // 没有找到群聊，打开私聊
+    }
+
+    // 没有群聊，打开私聊
     const otherUserId = message.sender_id === currentUserId ? message.receiver_id : message.sender_id;
-    // 根据消息方向正确显示对方名称
-    // 优先使用昵称，如果没有昵称则使用邮箱
     const otherUserName = message.sender_id === currentUserId
       ? '接收者'
       : (message.sender_nickname || message.sender_email || '接单者');
@@ -246,6 +433,14 @@ export const MessageDropdown: React.FC<MessageDropdownProps> = ({ currentUserId,
     if (!notification.is_read) {
       markNotificationAsRead(notification.id);
     }
+
+    // 处理任务完成确认请求
+    if (notification.type === 'task_completion' && onTaskCompletionRequest) {
+      onTaskCompletionRequest(notification.related_id || '');
+      setIsOpen(false);
+      return;
+    }
+
     // 移除自动跳转，避免页面空白
     // 如果需要跳转，可以根据 notification.type 或其他条件来判断
     setIsOpen(false);
@@ -263,7 +458,7 @@ export const MessageDropdown: React.FC<MessageDropdownProps> = ({ currentUserId,
       );
       setUnreadCount(prev => Math.max(0, prev - 1));
     } catch (err) {
-      console.error('标记已读失败:', err);
+      // 忽略错误
     }
   };
 
@@ -278,7 +473,7 @@ export const MessageDropdown: React.FC<MessageDropdownProps> = ({ currentUserId,
         return prev.filter(n => n.id !== notificationId);
       });
     } catch (err) {
-      console.error('删除通知失败:', err);
+      // 忽略错误
     }
   };
 
@@ -358,32 +553,48 @@ export const MessageDropdown: React.FC<MessageDropdownProps> = ({ currentUserId,
                       }`}
                     >
                       <div className="flex items-start gap-3">
-                        <div className="w-10 h-10 rounded-full bg-cyan-900/50 text-cyan-400 border border-cyan-500/30 flex items-center justify-center font-bold text-xs shrink-0">
-                          {msg.sender_id === currentUserId
-                            ? '发送至'
-                            : (msg.sender_nickname || msg.sender_email || '?').charAt(0).toUpperCase()
-                          }
+                        <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-xs shrink-0 ${
+                          msg.is_group_chat
+                            ? 'bg-purple-900/50 text-purple-400 border border-purple-500/30'
+                            : 'bg-cyan-900/50 text-cyan-400 border border-cyan-500/30'
+                        }`}>
+                          {msg.is_group_chat ? (
+                            <Users size={16} />
+                          ) : msg.sender_id === currentUserId ? (
+                            '发送至'
+                          ) : (
+                            (msg.sender_nickname || msg.sender_email || '?').charAt(0).toUpperCase()
+                          )}
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center justify-between mb-1">
                             <div className="text-sm font-semibold text-white truncate">
-                              {msg.sender_id === currentUserId
-                                ? `发送至: ${msg.task_title}`
-                                : (msg.sender_nickname || msg.sender_email || '未知用户')
-                              }
+                              {msg.is_group_chat ? (
+                                `${msg.task_title} (群聊)`
+                              ) : msg.sender_id === currentUserId ? (
+                                `发送至: ${msg.task_title}`
+                              ) : (
+                                (msg.sender_nickname || msg.sender_email || '未知用户')
+                              )}
                             </div>
                             <div className="text-[10px] text-slate-500 shrink-0 ml-2">
                               {formatTime(msg.created_at)}
                             </div>
                           </div>
                           <div className="text-xs text-slate-400 mb-1 truncate">
-                            任务：{msg.task_title || '未知任务'}
+                            {msg.is_group_chat ? (
+                              `${msg.sender_nickname || '用户'}: ${msg.content}`
+                            ) : (
+                              `任务：${msg.task_title || '未知任务'}`
+                            )}
                           </div>
-                          <div className="text-sm text-slate-200 truncate">
-                            {msg.content}
-                          </div>
+                          {!msg.is_group_chat && (
+                            <div className="text-sm text-slate-200 truncate">
+                              {msg.content}
+                            </div>
+                          )}
                         </div>
-                        {!msg.is_read && msg.receiver_id === currentUserId && (
+                        {!msg.is_read && (msg.receiver_id === currentUserId || msg.is_group_chat) && (
                           <div className="w-2 h-2 bg-orange-500 rounded-full shrink-0 mt-2" />
                         )}
                       </div>
