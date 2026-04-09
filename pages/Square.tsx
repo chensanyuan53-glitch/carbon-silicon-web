@@ -75,7 +75,47 @@ export const Square: React.FC<SquareProps> = ({ onTopicSelect }) => {
         console.error('fetch topics error', error);
         return;
       }
-      setTopics((data || []) as Topic[]);
+
+      // 获取所有帖子的用户ID，批量查询最新的用户信息
+      const topicsData = (data || []) as Topic[];
+      const userIds = [...new Set(topicsData.map(t => t.user_id).filter(Boolean))];
+
+      if (userIds.length > 0) {
+        // 从 profiles 表批量获取最新用户信息
+        const { data: profilesData, error: profilesError } = await supabase
+          .from('profiles')
+          .select('id, full_name, avatar_url')
+          .in('id', userIds);
+
+        if (!profilesError && profilesData) {
+          // 创建用户ID到用户信息的映射
+          const userMap = new Map();
+          profilesData.forEach((profile: any) => {
+            userMap.set(profile.id, {
+              nickname: profile.full_name || '',
+              avatar_url: profile.avatar_url || ''
+            });
+          });
+
+          // 更新帖子数据，使用最新的用户信息
+          const updatedTopics = topicsData.map(topic => {
+            const latestUserInfo = userMap.get(topic.user_id);
+            if (latestUserInfo) {
+              return {
+                ...topic,
+                user_nickname: latestUserInfo.nickname || topic.user_nickname,
+                user_avatar_url: latestUserInfo.avatar_url || topic.user_avatar_url
+              };
+            }
+            return topic;
+          });
+
+          setTopics(updatedTopics);
+          return;
+        }
+      }
+
+      setTopics(topicsData);
     } catch (err) {
       console.error('unexpected fetchTopics error', err);
     }

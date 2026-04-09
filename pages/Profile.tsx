@@ -26,7 +26,9 @@ export const Profile: React.FC<ProfileProps> = ({ onNavigate }) => {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [toast, setToast] = useState<{ visible: boolean; message: string; type?: 'success' | 'error' | 'info' }>({ visible: false, message: '', type: 'info' });
-  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+  /** 新选头像的本地预览（ObjectURL），勿把 base64 写进 user_metadata，否则 JWT 暴涨导致 Storage 等请求头超限 400 */
+  const [avatarObjectUrl, setAvatarObjectUrl] = useState<string | null>(null);
+  const [pendingAvatarFile, setPendingAvatarFile] = useState<File | null>(null);
   
   const [profile, setProfile] = useState<UserProfile>({
     id: '',
@@ -65,6 +67,12 @@ export const Profile: React.FC<ProfileProps> = ({ onNavigate }) => {
     loadUserProfile();
   }, []);
 
+  useEffect(() => {
+    return () => {
+      if (avatarObjectUrl) URL.revokeObjectURL(avatarObjectUrl);
+    };
+  }, [avatarObjectUrl]);
+
   const loadUserProfile = async () => {
     try {
       setIsLoading(true);
@@ -100,12 +108,17 @@ export const Profile: React.FC<ProfileProps> = ({ onNavigate }) => {
 
   const handleStartEdit = () => {
     setEditedProfile({ ...profile });
+    if (avatarObjectUrl) URL.revokeObjectURL(avatarObjectUrl);
+    setAvatarObjectUrl(null);
+    setPendingAvatarFile(null);
     setIsEditing(true);
   };
 
   const handleCancelEdit = () => {
     setEditedProfile({ ...profile });
-    setAvatarPreview(null);
+    if (avatarObjectUrl) URL.revokeObjectURL(avatarObjectUrl);
+    setAvatarObjectUrl(null);
+    setPendingAvatarFile(null);
     setIsEditing(false);
   };
 
@@ -125,12 +138,9 @@ export const Profile: React.FC<ProfileProps> = ({ onNavigate }) => {
       return;
     }
 
-    // 创建预览并转换为 base64
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      setAvatarPreview(reader.result as string);
-    };
-    reader.readAsDataURL(file);
+    if (avatarObjectUrl) URL.revokeObjectURL(avatarObjectUrl);
+    setAvatarObjectUrl(URL.createObjectURL(file));
+    setPendingAvatarFile(file);
   };
 
   const toggleDomain = (domain: string) => {
@@ -140,6 +150,23 @@ export const Profile: React.FC<ProfileProps> = ({ onNavigate }) => {
         ? prev.domains.filter(d => d !== domain)
         : [...prev.domains, domain]
     }));
+  };
+
+  const uploadAvatarToStorage = async (userId: string, file: Blob, fileNameHint?: string): Promise<string | null> => {
+    const ext =
+      fileNameHint?.split('.').pop()?.toLowerCase();
+    const safeExt =
+      ext && /^[a-z0-9]{1,8}$/.test(ext) ? ext : file.type.split('/').pop() || 'jpg';
+    const path = `${userId}/${Date.now()}.${safeExt}`;
+    const { error: upErr } = await supabase.storage.from('avatars').upload(path, file, {
+      upsert: true,
+      contentType: file.type || 'image/jpeg'
+    });
+    if (upErr) {
+      showToast(`头像上传失败: ${upErr.message}（请确认已在 Storage 创建公开桶 avatars 并已执行迁移 SQL）`, 'error');
+      return null;
+    }
+    return supabase.storage.from('avatars').getPublicUrl(path).data.publicUrl;
   };
 
   const handleSave = async () => {
@@ -152,6 +179,8 @@ export const Profile: React.FC<ProfileProps> = ({ onNavigate }) => {
         return;
       }
 
+      const meta = user.user_metadata || {};
+
       // 准备更新数据
       const updates: Record<string, any> = {
         nickname: editedProfile.nickname,
@@ -161,9 +190,31 @@ export const Profile: React.FC<ProfileProps> = ({ onNavigate }) => {
         skills: editedProfile.skills
       };
 
-      // 如果有头像预览，将 base64 直接存储在元数据中
-      if (avatarPreview) {
-        updates.avatar_url = avatarPreview;
+      let newAvatarUrl: string | undefined;
+
+      if (pendingAvatarFile) {
+        const url = await uploadAvatarToStorage(user.id, pendingAvatarFile, pendingAvatarFile.name);
+        if (!url) return;
+        newAvatarUrl = url;
+      } else {
+        const cur = meta.avatar_url;
+        if (
+          typeof cur === 'string' &&
+          cur.startsWith('data:') &&
+          cur.length > 1200
+        ) {
+          try {
+            const blob = await (await fetch(cur)).blob();
+            const url = await uploadAvatarToStorage(user.id, blob);
+            newAvatarUrl = url ?? '';
+          } catch {
+            newAvatarUrl = '';
+          }
+        }
+      }
+
+      if (newAvatarUrl !== undefined) {
+        updates.avatar_url = newAvatarUrl;
       }
 
       // 更新用户元数据
@@ -176,11 +227,28 @@ export const Profile: React.FC<ProfileProps> = ({ onNavigate }) => {
         return;
       }
 
+      // 同时更新 profiles 表，以便其他页面可以获取最新的用户信息
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .upsert({
+          id: user.id,
+          email: user.email,
+          full_name: editedProfile.nickname,
+          avatar_url: newAvatarUrl || meta.avatar_url || ''
+        }, { onConflict: 'id' });
+
+      if (profileError) {
+        console.error('更新 profiles 表失败:', profileError);
+        // 不阻止流程，因为 auth 更新已经成功
+      }
+
       // 刷新用户信息
       await loadUserProfile();
       // 强制刷新 session 以便 Navbar 获取最新数据
       await supabase.auth.refreshSession();
-      setAvatarPreview(null);
+      if (avatarObjectUrl) URL.revokeObjectURL(avatarObjectUrl);
+      setAvatarObjectUrl(null);
+      setPendingAvatarFile(null);
       setIsEditing(false);
       showToast('个人信息更新成功', 'success');
     } catch (error: any) {
@@ -212,7 +280,7 @@ export const Profile: React.FC<ProfileProps> = ({ onNavigate }) => {
       )}
 
       {/* Header */}
-      <div className="sticky top-0 z-40 bg-slate-900/80 backdrop-blur-md border-b border-slate-800">
+      <div className="sticky top-0 z-30 bg-slate-900/80 backdrop-blur-md border-b border-slate-800">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
             <button
@@ -236,7 +304,7 @@ export const Profile: React.FC<ProfileProps> = ({ onNavigate }) => {
 
           {/* Avatar Section */}
           <div className="px-8 pb-8">
-            <div className="flex items-end -mt-16 mb-6">
+            <div className="flex items-start gap-6">
               <div className="relative">
                 {isEditing ? (
                   <>
@@ -247,9 +315,9 @@ export const Profile: React.FC<ProfileProps> = ({ onNavigate }) => {
                         onChange={handleAvatarChange}
                         className="hidden"
                       />
-                      {avatarPreview || editedProfile.avatar_url ? (
+                      {avatarObjectUrl || editedProfile.avatar_url ? (
                         <img
-                          src={avatarPreview || editedProfile.avatar_url}
+                          src={avatarObjectUrl || editedProfile.avatar_url}
                           alt="头像"
                           className="w-full h-full object-cover"
                         />
@@ -283,7 +351,7 @@ export const Profile: React.FC<ProfileProps> = ({ onNavigate }) => {
                 )}
               </div>
 
-              <div className="ml-6 mb-2 flex-1">
+              <div className="flex-1">
                 <div className="flex items-center gap-3">
                   <h2 className="text-2xl font-bold text-white">
                     {isEditing ? (
@@ -319,7 +387,7 @@ export const Profile: React.FC<ProfileProps> = ({ onNavigate }) => {
                 )}
               </div>
 
-              <div className="mb-2">
+              <div className="flex flex-col gap-2">
                 {!isEditing ? (
                   <button
                     onClick={handleStartEdit}
@@ -335,6 +403,150 @@ export const Profile: React.FC<ProfileProps> = ({ onNavigate }) => {
                     取消
                   </button>
                 )}
+                <button
+                  onClick={() => {
+                    // 创建密码修改弹窗
+                    const modal = document.createElement('div');
+                    modal.className = 'fixed inset-0 bg-black/50 flex items-center justify-center z-50';
+                    modal.innerHTML = `
+                      <div class="bg-slate-800 rounded-2xl border border-slate-700 shadow-2xl p-6 w-full max-w-md mx-4">
+                        <h3 class="text-lg font-semibold text-white mb-4">修改密码</h3>
+                        <div class="space-y-4">
+                          <div>
+                            <label class="text-sm font-medium text-slate-400 mb-1 block">新密码</label>
+                            <input 
+                              type="password" 
+                              id="new-password"
+                              class="w-full bg-slate-900/50 border border-slate-600 rounded-lg px-3 py-2 text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 transition-colors"
+                              placeholder="输入新密码"
+                            />
+                          </div>
+                          <div>
+                            <label class="text-sm font-medium text-slate-400 mb-1 block">确认新密码</label>
+                            <input 
+                              type="password" 
+                              id="confirm-password"
+                              class="w-full bg-slate-900/50 border border-slate-600 rounded-lg px-3 py-2 text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 transition-colors"
+                              placeholder="再次输入新密码"
+                            />
+                          </div>
+                          <div class="flex gap-3 pt-2">
+                            <button 
+                              id="cancel-password"
+                              class="flex-1 px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg transition-colors"
+                            >
+                              取消
+                            </button>
+                            <button 
+                              id="save-password"
+                              class="flex-1 px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg transition-colors disabled:opacity-50"
+                            >
+                              确认修改
+                            </button>
+                          </div>
+                          <div id="password-error" class="text-red-400 text-sm hidden"></div>
+                        </div>
+                      </div>
+                    `;
+                    document.body.appendChild(modal);
+
+                    // 获取元素
+                    const newPasswordInput = modal.querySelector('#new-password') as HTMLInputElement;
+                    const confirmPasswordInput = modal.querySelector('#confirm-password') as HTMLInputElement;
+                    const cancelBtn = modal.querySelector('#cancel-password') as HTMLButtonElement;
+                    const saveBtn = modal.querySelector('#save-password') as HTMLButtonElement;
+                    const errorDiv = modal.querySelector('#password-error') as HTMLDivElement;
+
+                    // 取消按钮
+                    cancelBtn.addEventListener('click', () => {
+                      document.body.removeChild(modal);
+                    });
+
+                    // 保存按钮
+                    saveBtn.addEventListener('click', async () => {
+                      const newPassword = newPasswordInput.value;
+                      const confirmPassword = confirmPasswordInput.value;
+
+                      // 验证
+                      if (!newPassword || !confirmPassword) {
+                        errorDiv.textContent = '请输入新密码';
+                        errorDiv.classList.remove('hidden');
+                        return;
+                      }
+
+                      if (newPassword !== confirmPassword) {
+                        errorDiv.textContent = '两次输入的密码不一致';
+                        errorDiv.classList.remove('hidden');
+                        return;
+                      }
+
+                      if (newPassword.length < 6) {
+                        errorDiv.textContent = '密码长度至少6位';
+                        errorDiv.classList.remove('hidden');
+                        return;
+                      }
+
+                      // 禁用按钮
+                      saveBtn.disabled = true;
+                      saveBtn.textContent = '修改中...';
+
+                      try {
+                        const { error } = await supabase.auth.updateUser({
+                          password: newPassword
+                        });
+
+                        if (error) {
+                          errorDiv.textContent = `修改失败: ${error.message}`;
+                          errorDiv.classList.remove('hidden');
+                          saveBtn.disabled = false;
+                          saveBtn.textContent = '确认修改';
+                          return;
+                        }
+
+                        // 成功
+                        const successDiv = document.createElement('div');
+                        successDiv.className = 'text-green-400 text-sm mt-2';
+                        successDiv.textContent = '密码修改成功！请重新登录';
+                        errorDiv.parentNode?.insertBefore(successDiv, errorDiv.nextSibling);
+
+                        // 2秒后关闭弹窗并退出登录
+                        setTimeout(async () => {
+                          document.body.removeChild(modal);
+                          showToast('密码修改成功，请重新登录', 'success');
+                          
+                          // 退出登录
+                          await supabase.auth.signOut();
+                          
+                          // 跳转到登录界面（注册页面也包含登录功能）
+                          onNavigate(Page.REGISTER);
+                        }, 2000);
+
+                      } catch (err: any) {
+                        errorDiv.textContent = `修改失败: ${err.message}`;
+                        errorDiv.classList.remove('hidden');
+                        saveBtn.disabled = false;
+                        saveBtn.textContent = '确认修改';
+                      }
+                    });
+
+                    // 点击外部关闭
+                    modal.addEventListener('click', (e) => {
+                      if (e.target === modal) {
+                        document.body.removeChild(modal);
+                      }
+                    });
+
+                    // 回车键提交
+                    modal.addEventListener('keydown', (e) => {
+                      if (e.key === 'Enter') {
+                        saveBtn.click();
+                      }
+                    });
+                  }}
+                  className="flex items-center gap-2 px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg transition-colors"
+                >
+                  修改密码
+                </button>
               </div>
             </div>
 

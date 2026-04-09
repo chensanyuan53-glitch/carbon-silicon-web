@@ -15,6 +15,29 @@ interface Message {
   sender_nickname?: string;
   is_group_chat?: boolean;
   group_id?: number;
+  /** 群聊消息类型，用于预览（如 file 需解析 JSON） */
+  message_type?: string;
+}
+
+/** 铃铛/消息列表里群聊最后一条话的摘要 */
+function formatGroupChatPreviewSnippet(content: string, messageType?: string | null): string {
+  if (messageType === 'file') {
+    try {
+      const info = JSON.parse(content) as { fileName?: string };
+      const name = typeof info.fileName === 'string' ? info.fileName : '文件';
+      return `[文件] ${name}`;
+    } catch {
+      const dq = content.match(/"fileName"\s*:\s*"([^"]*)"/);
+      if (dq) return `[文件] ${dq[1]}`;
+      const sq = content.match(/'fileName'\s*:\s*'([^']*)'/);
+      if (sq) return `[文件] ${sq[1]}`;
+      return '[文件]';
+    }
+  }
+  if (messageType === 'system') {
+    return content.length > 80 ? `${content.slice(0, 80)}…` : content;
+  }
+  return content;
 }
 
 interface Notification {
@@ -250,7 +273,8 @@ export const MessageDropdown: React.FC<MessageDropdownProps> = ({ currentUserId,
               created_at: msg.created_at,
               sender_nickname: msg.sender_nickname,
               is_group_chat: true, // 标记为群聊
-              group_id: msg.group_id
+              group_id: msg.group_id,
+              message_type: msg.message_type
             }));
           }
         }
@@ -490,7 +514,7 @@ export const MessageDropdown: React.FC<MessageDropdownProps> = ({ currentUserId,
 
   return (
     <>
-      <div className="relative" ref={dropdownRef}>
+      <div className="relative z-50" ref={dropdownRef}>
         <button
           onClick={() => setIsOpen(!isOpen)}
           className="relative p-2 hover:bg-slate-700/50 rounded-lg transition-colors"
@@ -505,7 +529,7 @@ export const MessageDropdown: React.FC<MessageDropdownProps> = ({ currentUserId,
         </button>
 
         {isOpen && (
-          <div className="absolute right-0 top-12 w-96 bg-[#1e293b] border border-slate-700 rounded-2xl shadow-2xl overflow-hidden">
+          <div className="absolute right-0 top-12 z-50 w-96 bg-[#1e293b] border border-slate-700 rounded-2xl shadow-2xl overflow-hidden">
             {/* 标签页切换 */}
             <div className="px-4 py-3 border-b border-slate-800 flex items-center justify-between">
               <div className="flex gap-2">
@@ -583,7 +607,7 @@ export const MessageDropdown: React.FC<MessageDropdownProps> = ({ currentUserId,
                           </div>
                           <div className="text-xs text-slate-400 mb-1 truncate">
                             {msg.is_group_chat ? (
-                              `${msg.sender_nickname || '用户'}: ${msg.content}`
+                              `${msg.sender_nickname || '用户'}: ${formatGroupChatPreviewSnippet(msg.content, msg.message_type)}`
                             ) : (
                               `任务：${msg.task_title || '未知任务'}`
                             )}

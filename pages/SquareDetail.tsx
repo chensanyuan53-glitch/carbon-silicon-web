@@ -71,7 +71,27 @@ export const SquareDetail: React.FC<SquareDetailProps> = ({ topicId, onBack }) =
         console.error('fetch topic error', error);
         return;
       }
-      setTopic(data as Topic);
+
+      let topicData = data as Topic;
+
+      // 从 profiles 表获取最新的用户信息
+      if (topicData.user_id) {
+        const { data: profileData, error: profileError } = await supabase
+          .from('profiles')
+          .select('full_name, avatar_url')
+          .eq('id', topicData.user_id)
+          .single();
+
+        if (!profileError && profileData) {
+          topicData = {
+            ...topicData,
+            user_nickname: profileData.full_name || topicData.user_nickname,
+            user_avatar_url: profileData.avatar_url || topicData.user_avatar_url
+          };
+        }
+      }
+
+      setTopic(topicData);
 
       // 检查当前用户是否已浏览过此话题
       if (currentUserId) {
@@ -111,7 +131,45 @@ export const SquareDetail: React.FC<SquareDetailProps> = ({ topicId, onBack }) =
         console.error('fetch comments error', error);
         return;
       }
-      setComments((data || []) as Comment[]);
+
+      let commentsData = (data || []) as Comment[];
+
+      // 获取所有评论的用户ID，批量查询最新的用户信息
+      const userIds = [...new Set(commentsData.map(c => c.user_id).filter(Boolean))];
+
+      if (userIds.length > 0) {
+        // 从 profiles 表批量获取最新用户信息
+        const { data: profilesData, error: profilesError } = await supabase
+          .from('profiles')
+          .select('id, full_name, avatar_url')
+          .in('id', userIds);
+
+        if (!profilesError && profilesData) {
+          // 创建用户ID到用户信息的映射
+          const userMap = new Map();
+          profilesData.forEach((profile: any) => {
+            userMap.set(profile.id, {
+              nickname: profile.full_name || '',
+              avatar_url: profile.avatar_url || ''
+            });
+          });
+
+          // 更新评论数据，使用最新的用户信息
+          commentsData = commentsData.map(comment => {
+            const latestUserInfo = userMap.get(comment.user_id);
+            if (latestUserInfo) {
+              return {
+                ...comment,
+                user_nickname: latestUserInfo.nickname || comment.user_nickname,
+                user_avatar_url: latestUserInfo.avatar_url || comment.user_avatar_url
+              };
+            }
+            return comment;
+          });
+        }
+      }
+
+      setComments(commentsData);
     } catch (err) {
       console.error('unexpected fetchComments error', err);
     }
