@@ -12,7 +12,7 @@ interface CreatorDashboardProps {
 const STATUS_LABEL: Record<string, string> = {
   pending: '待评审',
   winner: '已优胜',
-  runner_up: 'Runner-up',
+  runner_up: '已入围',
   rejected: '未通过',
 };
 

@@ -23,7 +23,7 @@ interface ArenaDetailProps {
 const STATUS_LABEL: Record<string, string> = {
   pending: '待评审',
   winner: '已优胜',
-  runner_up: 'Runner-up',
+  runner_up: '已入围',
   rejected: '未通过',
 };
 
@@ -68,6 +68,11 @@ export const ArenaDetail: React.FC<ArenaDetailProps> = ({
   const [mySubmission, setMySubmission] = useState<ArenaSubmission | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // 判断是否有优胜方案（竞技场结束）
+  const hasWinner = submissions.some(s => s.status === 'winner');
+  // 判断竞技场是否可投稿（未结束且未超时）
+  const canSubmit = !hasWinner && arena && new Date(arena.deadline) > new Date();
 
   const [submitModalOpen, setSubmitModalOpen] = useState(false);
   const [offlineModalOpen, setOfflineModalOpen] = useState(false);
@@ -280,18 +285,30 @@ export const ArenaDetail: React.FC<ArenaDetailProps> = ({
         {/* 工人：未投稿 */}
         {session && !isCreator && !mySubmission && (
           <div className="rounded-xl border border-slate-700 bg-slate-800/60 p-8 text-center">
-            <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-amber-500/10 mb-6 border border-amber-500/20">
-              <Send size={36} className="text-amber-400" />
-            </div>
-            <h3 className="text-white font-bold text-lg mb-2">提交你的方案，参与竞技</h3>
-            <p className="text-slate-400 text-sm mb-6">展示你的创意，赢取丰厚奖金</p>
-            <button
-              type="button"
-              onClick={() => setSubmitModalOpen(true)}
-              className="inline-flex items-center gap-2 bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-white px-8 py-3 rounded-xl font-semibold shadow-lg shadow-amber-500/30 hover:shadow-amber-500/50 transition-all hover:-translate-y-0.5"
-            >
-              <Send size={20} /> 立即投稿
-            </button>
+            {canSubmit ? (
+              <>
+                <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-amber-500/10 mb-6 border border-amber-500/20">
+                  <Send size={36} className="text-amber-400" />
+                </div>
+                <h3 className="text-white font-bold text-lg mb-2">提交你的方案，参与竞技</h3>
+                <p className="text-slate-400 text-sm mb-6">展示你的创意，赢取丰厚奖金</p>
+                <button
+                  type="button"
+                  onClick={() => setSubmitModalOpen(true)}
+                  className="inline-flex items-center gap-2 bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-white px-8 py-3 rounded-xl font-semibold shadow-lg shadow-amber-500/30 hover:shadow-amber-500/50 transition-all hover:-translate-y-0.5"
+                >
+                  <Send size={20} /> 立即投稿
+                </button>
+              </>
+            ) : (
+              <>
+                <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-slate-700/50 mb-6 border border-slate-600">
+                  <AlertTriangle size={36} className="text-slate-500" />
+                </div>
+                <h3 className="text-white font-bold text-lg mb-2">竞技场已结束</h3>
+                <p className="text-slate-400 text-sm">感谢参与，下次竞技场再见</p>
+              </>
+            )}
           </div>
         )}
 

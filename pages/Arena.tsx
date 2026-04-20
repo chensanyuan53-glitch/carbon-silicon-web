@@ -1,12 +1,14 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import type { Session } from '@supabase/supabase-js';
-import { Trophy, Clock, Plus, X, Lightbulb, BarChart3, Zap, Users, Sparkles } from 'lucide-react';
-import { fetchArenas, createArena } from '../src/api/arena';
+import { Trophy, Clock, Plus, X, Lightbulb, BarChart3, Zap, Users, Sparkles, Trash2, AlertTriangle } from 'lucide-react';
+import { fetchArenas, createArena, deleteArena } from '../src/api/arena';
+import { Page } from '../types';
 import type { Arena as ArenaType } from '../types/supabase';
+
+type ArenaWithCount = ArenaType & { submission_count: number };
 import type { CreateArenaInput } from '../src/api/arena';
 import { ArenaDetail } from './ArenaDetail';
 import { supabase } from '../src/supabaseClient';
-import { Page } from '../types';
 
 interface ArenaProps {
   session?: Session | null;
@@ -14,7 +16,7 @@ interface ArenaProps {
 }
 
 type ArenaMode = 'pitch' | 'benchmark' | 'speed' | null;
-type FilterMode = 'all' | 'pitch' | 'benchmark' | 'speed';
+type FilterMode = 'all' | 'recruiting' | 'reviewing' | 'finished';
 
 const MODE_CONFIG = {
   pitch: {
@@ -85,7 +87,7 @@ function AnimatedNumber({ value, duration = 1500 }: { value: number; duration?: 
 
 export const Arena: React.FC<ArenaProps> = ({ session: sessionProp, onNavigate }) => {
   const [session, setSession] = useState<Session | null>(sessionProp ?? null);
-  const [arenas, setArenas] = useState<ArenaType[]>([]);
+  const [arenas, setArenas] = useState<ArenaWithCount[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [createModalOpen, setCreateModalOpen] = useState(false);
@@ -103,6 +105,10 @@ export const Arena: React.FC<ArenaProps> = ({ session: sessionProp, onNavigate }
   });
   const [createSubmitting, setCreateSubmitting] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [deleteArenaId, setDeleteArenaId] = useState<number | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [toast, setToast] = useState<{ visible: boolean; message: string; type?: 'success' | 'error' }>({ visible: false, message: '' });
   const [now, setNow] = useState(Date.now());
 
   useEffect(() => {
@@ -138,7 +144,7 @@ export const Arena: React.FC<ArenaProps> = ({ session: sessionProp, onNavigate }
 
   const filteredArenas = useMemo(() => {
     if (filterMode === 'all') return arenas;
-    return arenas.filter((a) => a.mode === filterMode);
+    return arenas.filter((a) => a.status === filterMode);
   }, [arenas, filterMode]);
 
   const totalPrizePool = useMemo(() => {
@@ -189,6 +195,31 @@ export const Arena: React.FC<ArenaProps> = ({ session: sessionProp, onNavigate }
     }
   };
 
+  const handleDeleteClick = (e: React.MouseEvent, arenaId: number) => {
+    e.stopPropagation();
+    setDeleteArenaId(arenaId);
+    setDeleteModalOpen(true);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!deleteArenaId) return;
+    setDeleting(true);
+    try {
+      await deleteArena(deleteArenaId);
+      setDeleteModalOpen(false);
+      setDeleteArenaId(null);
+      setToast({ visible: true, message: '删除成功', type: 'success' });
+      setTimeout(() => setToast({ visible: false, message: '' }), 2000);
+      await loadArenas();
+    } catch (e) {
+      console.error('Delete failed:', e);
+      setToast({ visible: true, message: '删除失败，请重试', type: 'error' });
+      setTimeout(() => setToast({ visible: false, message: '' }), 2000);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   if (selectedArenaId != null) {
     return (
       <ArenaDetail
@@ -201,16 +232,16 @@ export const Arena: React.FC<ArenaProps> = ({ session: sessionProp, onNavigate }
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 pb-20">
+    <div className="min-h-screen bg-slate-900 pb-20">
       {/* Hero Banner */}
       <div className="relative overflow-hidden border-b border-amber-500/20">
-        <div className="absolute inset-0 bg-gradient-to-br from-amber-900/10 via-slate-950 to-slate-950"></div>
+        <div className="absolute inset-0 bg-gradient-to-br from-amber-900/10 via-slate-900 to-slate-900"></div>
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-amber-500/5 via-transparent to-transparent"></div>
         <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16 md:py-24">
           <div className="text-center">
             <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400 text-sm font-medium mb-6">
               <Sparkles size={16} />
-              CARBON SILICON ARENA
+              碳硅竞技场
             </div>
             <h1 className="text-4xl md:text-6xl lg:text-7xl font-black text-white mb-4 tracking-tight">
               <span className="bg-gradient-to-r from-amber-400 via-amber-300 to-amber-500 bg-clip-text text-transparent">
@@ -250,21 +281,23 @@ export const Arena: React.FC<ArenaProps> = ({ session: sessionProp, onNavigate }
           >
             全部
           </button>
-          {(['pitch', 'benchmark', 'speed'] as const).map((mode) => {
-            const config = MODE_CONFIG[mode];
-            const Icon = config.icon;
+          {(['recruiting', 'reviewing', 'finished'] as const).map((status) => {
+            const statusConfig = {
+              recruiting: { label: '进行中', color: 'bg-green-500/20 text-green-400 border-green-500/40' },
+              reviewing: { label: '评审中', color: 'bg-blue-500/20 text-blue-400 border-blue-500/40' },
+              finished: { label: '已完成', color: 'bg-slate-500/20 text-slate-400 border-slate-500/40' },
+            };
             return (
               <button
-                key={mode}
-                onClick={() => setFilterMode(mode)}
-                className={`shrink-0 px-6 py-2.5 rounded-xl font-medium transition-all flex items-center gap-2 ${
-                  filterMode === mode
-                    ? `${config.color} ${config.borderColor} ${config.textColor} border shadow-lg`
+                key={status}
+                onClick={() => setFilterMode(status)}
+                className={`shrink-0 px-6 py-2.5 rounded-xl font-medium transition-all ${
+                  filterMode === status
+                    ? `${statusConfig[status].color} border shadow-lg`
                     : 'bg-slate-900/50 text-slate-400 border border-slate-700 hover:border-slate-600'
                 }`}
               >
-                <Icon size={18} />
-                {config.emoji} {config.label}
+                {statusConfig[status].label}
               </button>
             );
           })}
@@ -291,7 +324,7 @@ export const Arena: React.FC<ArenaProps> = ({ session: sessionProp, onNavigate }
         )}
         {!loading && !error && filteredArenas.length === 0 && (
           <div className="text-slate-400 py-20 text-center">
-            {filterMode === 'all' ? '暂无进行中的竞技场，快来发布一个吧' : `暂无${MODE_CONFIG[filterMode as keyof typeof MODE_CONFIG]?.label}类型的竞技场`}
+            {filterMode === 'all' ? '暂无竞技场，快来发布一个吧' : `暂无${filterMode === 'recruiting' ? '进行中' : filterMode === 'reviewing' ? '评审中' : '已完成'}的竞技场`}
           </div>
         )}
 
@@ -304,17 +337,42 @@ export const Arena: React.FC<ArenaProps> = ({ session: sessionProp, onNavigate }
               const config = mode ? MODE_CONFIG[mode] : null;
               const ModeIcon = config?.icon || Trophy;
               return (
-                <button
+                <div
                   key={arena.id}
-                  type="button"
                   onClick={() => setSelectedArenaId(arena.id)}
-                  className="group text-left rounded-2xl border transition-all p-6 bg-slate-900/50 backdrop-blur-md border-slate-700 hover:border-amber-500/50 hover:shadow-[0_0_20px_rgba(245,158,11,0.3)] hover:bg-slate-900/70 relative overflow-hidden"
+                  className="group text-left rounded-2xl border transition-all p-6 bg-slate-900/50 backdrop-blur-md border-slate-700 hover:border-amber-500/50 hover:shadow-[0_0_20px_rgba(245,158,11,0.3)] hover:bg-slate-900/70 relative overflow-hidden cursor-pointer"
                 >
                   {/* Mode Badge */}
                   {mode && config && (
                     <div className={`absolute top-4 left-4 px-3 py-1.5 rounded-full ${config.color} ${config.borderColor} border flex items-center gap-1.5 text-xs font-medium ${config.textColor}`}>
                       <ModeIcon size={14} />
                       {config.emoji} {config.label}
+                    </div>
+                  )}
+
+                  {/* Action Buttons - Top Right */}
+                  <div className="absolute top-4 right-4 flex items-center gap-2 z-10" onClick={e => e.stopPropagation()}>
+                    {session && session.user?.id === arena.creator_id && (
+                      <button
+                        type="button"
+                        onClick={(e) => handleDeleteClick(e, arena.id)}
+                        className="p-1.5 rounded-full bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/30 transition-colors"
+                        title="删除竞技场"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Status Badge */}
+                  {arena.status === 'finished' && (
+                    <div className="absolute top-4 right-16 px-3 py-1.5 rounded-full bg-slate-600/80 text-slate-300 border border-slate-500 text-xs font-medium">
+                      已结束
+                    </div>
+                  )}
+                  {arena.status === 'reviewing' && (
+                    <div className="absolute top-4 right-16 px-3 py-1.5 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/40 text-xs font-medium">
+                      评审中
                     </div>
                   )}
 
@@ -351,10 +409,10 @@ export const Arena: React.FC<ArenaProps> = ({ session: sessionProp, onNavigate }
                   <div className="pt-4 border-t border-slate-700/50">
                     <div className="flex items-center gap-2 text-xs text-slate-500">
                       <Users size={14} />
-                      <span>已有 {Math.floor(Math.random() * 50) + 5} 人参赛</span>
+                      <span>已有 {(arena as ArenaWithCount).submission_count || 0} 人参赛</span>
                     </div>
                   </div>
-                </button>
+                </div>
               );
             })}
           </div>
@@ -492,12 +550,21 @@ export const Arena: React.FC<ArenaProps> = ({ session: sessionProp, onNavigate }
               </div>
               <div>
                 <label className="block text-xs font-medium text-slate-400 mb-1">截止时间 *</label>
-                <input
-                  type="datetime-local"
-                  value={formData.deadline}
-                  onChange={(e) => setFormData((d) => ({ ...d, deadline: e.target.value }))}
-                  className="w-full bg-slate-950 border border-slate-700 text-white px-3 py-2 rounded-lg focus:outline-none focus:border-amber-500"
-                />
+                <div className="relative">
+                  <input
+                    type="datetime-local"
+                    value={formData.deadline}
+                    onChange={(e) => setFormData((d) => ({ ...d, deadline: e.target.value }))}
+                    placeholder="点击选择日期和时间"
+                    className="w-full bg-slate-950 border border-slate-700 text-white px-3 py-2 rounded-lg focus:outline-none focus:border-amber-500 appearance-none cursor-pointer placeholder:text-slate-500"
+                    style={{ colorScheme: 'dark' }}
+                  />
+                  <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
+                    <svg className="w-5 h-5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                    </svg>
+                  </div>
+                </div>
               </div>
               <button
                 type="submit"
@@ -507,6 +574,69 @@ export const Arena: React.FC<ArenaProps> = ({ session: sessionProp, onNavigate }
                 {createSubmitting ? '发布中...' : '发布'}
               </button>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {deleteModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" onClick={() => setDeleteModalOpen(false)} />
+          <div className="relative bg-slate-900 w-full max-w-md rounded-2xl border border-red-500/30 shadow-2xl overflow-hidden">
+            <div className="bg-slate-950 border-b border-red-500/30 p-4 flex justify-between items-center">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="text-red-400" size={20} />
+                <h3 className="text-lg font-bold text-white">确认删除</h3>
+              </div>
+              <button type="button" onClick={() => setDeleteModalOpen(false)} className="text-slate-500 hover:text-white">
+                <X size={22} />
+              </button>
+            </div>
+            <div className="p-6">
+              <p className="text-slate-300 mb-4">确定要删除此竞技场吗？此操作不可撤销：</p>
+              <ul className="text-slate-400 text-sm space-y-2 mb-6 list-disc list-inside">
+                <li>竞技场及所有投稿将被永久删除</li>
+                <li>已发放的奖金不受影响</li>
+              </ul>
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setDeleteModalOpen(false)}
+                  className="flex-1 px-4 py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-lg font-medium transition-colors"
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDeleteConfirm}
+                  disabled={deleting}
+                  className="flex-1 px-4 py-3 bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
+                >
+                  {deleting ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      删除中...
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 size={16} />
+                      确认删除
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Toast */}
+      {toast.visible && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center pointer-events-none">
+          <div className="pointer-events-auto max-w-lg w-full mx-4">
+            <div className={`rounded-xl border-2 p-5 px-6 shadow-2xl ${toast.type === 'error' ? 'bg-rose-900 border-rose-500' : 'bg-emerald-900 border-emerald-500'} text-white text-center`}>
+              <div className="text-lg font-semibold">{toast.message}</div>
+            </div>
           </div>
         </div>
       )}
