@@ -9,7 +9,8 @@ import {
   MessageSquare,
   ShoppingBag,
   User,
-  LogOut // 3. 引入退出图标
+  LogOut, // 3. 引入退出图标
+  Shield // 引入管理员图标
 } from 'lucide-react';
 import { MessageDropdown } from './MessageDropdown';
 
@@ -36,6 +37,24 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPage, onNavigate, session
   const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
   const accountMenuRef = useRef<HTMLDivElement | null>(null);
   const [showDropdown, setShowDropdown] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  // 检查是否为管理员
+  useEffect(() => {
+    const checkAdmin = async () => {
+      if (session?.user?.id) {
+        const { data } = await supabase
+          .from('profiles')
+          .select('is_admin')
+          .eq('id', session.user.id)
+          .single();
+        setIsAdmin(data?.is_admin || false);
+      } else {
+        setIsAdmin(false);
+      }
+    };
+    checkAdmin();
+  }, [session]);
 
   // 当 session 变化时重置状态栏显示
   useEffect(() => {
@@ -62,6 +81,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPage, onNavigate, session
     { id: Page.TASKS, label: '任务大厅', icon: Briefcase },
     { id: Page.SQUARE, label: '广场', icon: MessageSquare },
     { id: Page.MARKET, label: '成果市集', icon: ShoppingBag },
+    ...(isAdmin ? [{ id: Page.USER_MANAGEMENT, label: '用户管理', icon: Shield }] : []),
   ];
 
   // 5. 处理退出登录的逻辑

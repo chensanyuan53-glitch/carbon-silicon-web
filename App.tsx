@@ -16,6 +16,7 @@ import { Register } from './pages/Register';
 import { Profile } from './pages/Profile';
 import { ResetPassword } from './pages/ResetPassword';
 import { ProgressReminders } from './pages/ProgressReminders';
+import { UserManagement } from './pages/UserManagement';
 import { AIChat } from './components/AIChat';
 import { ChatDialog } from './components/ChatDialog';
 import { GroupChatDialog } from './components/GroupChatDialog';
@@ -74,6 +75,7 @@ function App() {
       const topicParam = urlParams.get('topic');
       const productParam = urlParams.get('product');
       const tabParam = urlParams.get('tab');
+      const taskIdParam = urlParams.get('task_id');
 
       if (productParam) {
         setCurrentPage(Page.MARKET);
@@ -86,6 +88,11 @@ function App() {
       } else if (tabParam && tabParam === 'learning') {
         setCurrentPage(Page.STATION);
         setStationTab('learning');
+        window.history.replaceState({}, document.title, window.location.pathname);
+      } else if (taskIdParam) {
+        // 处理组队申请通知跳转
+        setCurrentPage(Page.TASKS);
+        localStorage.setItem('pendingTeamJoinTaskId', taskIdParam);
         window.history.replaceState({}, document.title, window.location.pathname);
       }
 
@@ -140,6 +147,8 @@ function App() {
         return <ResetPassword onNavigate={setCurrentPage} />;
       case Page.PROGRESS_REMINDERS:
         return <ProgressReminders />;
+      case Page.USER_MANAGEMENT:
+        return <UserManagement onNavigate={setCurrentPage} />;
       default:
         return <Home onNavigate={setCurrentPage} onSetStationTab={setStationTab} />;
     }

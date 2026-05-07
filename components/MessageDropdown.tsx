@@ -46,6 +46,7 @@ interface Notification {
   type: string;
   title: string;
   content: string;
+  related_id?: string;
   related_link?: string;
   is_read: boolean;
   created_at: string;
@@ -458,6 +459,13 @@ export const MessageDropdown: React.FC<MessageDropdownProps> = ({ currentUserId,
       markNotificationAsRead(notification.id);
     }
 
+    // 处理新话题通知，跳转到相关链接
+    if (notification.type === 'new_topic' && notification.related_link) {
+      window.location.href = notification.related_link;
+      setIsOpen(false);
+      return;
+    }
+
     // 处理任务完成确认请求
     if (notification.type === 'task_completion' && onTaskCompletionRequest) {
       onTaskCompletionRequest(notification.related_id || '');
@@ -465,8 +473,13 @@ export const MessageDropdown: React.FC<MessageDropdownProps> = ({ currentUserId,
       return;
     }
 
-    // 移除自动跳转，避免页面空白
-    // 如果需要跳转，可以根据 notification.type 或其他条件来判断
+    // 处理组队申请通知
+    if (notification.type === 'team_join_request' && notification.related_link) {
+      window.location.href = notification.related_link;
+      setIsOpen(false);
+      return;
+    }
+
     setIsOpen(false);
   };
 

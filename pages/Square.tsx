@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { MessageSquare, ThumbsUp, Eye, Share2, Plus, Hash, X, Image, Trash, Check, Copy } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { MessageSquare, ThumbsUp, Eye, Share2, Plus, Hash, X, Trash, Check, Copy, Upload, FileText } from 'lucide-react';
 import { supabase } from '../src/supabaseClient';
 import { Topic, HotTopic, RecommendedUser } from '../types';
 
@@ -12,6 +12,7 @@ export const Square: React.FC<SquareProps> = ({ onTopicSelect }) => {
   const [topics, setTopics] = useState<Topic[]>([]);
   const [hotTopics, setHotTopics] = useState<HotTopic[]>([]);
   const [recommendedUsers, setRecommendedUsers] = useState<RecommendedUser[]>([]);
+  const [followingIds, setFollowingIds] = useState<Set<string>>(new Set());
   const [showPublishModal, setShowPublishModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Topic | null>(null);
@@ -23,6 +24,8 @@ export const Square: React.FC<SquareProps> = ({ onTopicSelect }) => {
     category: '#脑洞大开',
     tag: ''
   });
+  const [uploadedFileName, setUploadedFileName] = useState<string>('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Toast notification state
   const [toast, setToast] = useState<{ visible: boolean; message: string; type?: 'success' | 'error' | 'info' }>({ visible: false, message: '', type: 'info' });
@@ -31,6 +34,39 @@ export const Square: React.FC<SquareProps> = ({ onTopicSelect }) => {
   const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info', duration = 3000) => {
     setToast({ visible: true, message, type });
     setTimeout(() => setToast({ visible: false, message: '', type }), duration);
+  };
+
+  // 处理 Markdown 文件上传
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // 检查文件类型
+    if (!file.name.endsWith('.md') && file.type !== 'text/markdown') {
+      showToast('请上传 .md 格式的 Markdown 文件', 'error');
+      return;
+    }
+
+    setUploadedFileName(file.name);
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const content = event.target?.result as string;
+      if (content) {
+        // 如果标题为空，尝试从文件名生成标题（去掉 .md 后缀）
+        if (!form.title) {
+          const titleFromFileName = file.name.replace(/\.md$/i, '');
+          setForm(prev => ({ ...prev, title: titleFromFileName, content }));
+        } else {
+          setForm(prev => ({ ...prev, content }));
+        }
+        showToast('已读取文件内容', 'success');
+      }
+    };
+    reader.onerror = () => {
+      showToast('文件读取失败，请重试', 'error');
+    };
+    reader.readAsText(file, 'UTF-8');
   };
 
   // 复制分享链接
@@ -151,34 +187,176 @@ export const Square: React.FC<SquareProps> = ({ onTopicSelect }) => {
     }
   };
 
-  const fetchRecommendedUsers = async () => {
+  // 获取当前用户的关注列表
+  const fetchFollowing = async (userId: string) => {
     try {
       const { data, error } = await supabase
-        .from('recommended_users')
-        .select('*')
-        .eq('is_active', true)
-        .order('order_index', { ascending: true })
-        .limit(5);
+        .from('user_follows')
+        .select('following_id')
+        .eq('follower_id', userId);
+
       if (error) {
-        console.error('fetch recommended users error', error);
+        console.error('获取关注列表失败:', error);
         return;
       }
-      setRecommendedUsers((data || []) as RecommendedUser[]);
+
+      setFollowingIds(new Set((data || []).map(d => d.following_id)));
     } catch (err) {
-      console.error('unexpected fetchRecommendedUsers error', err);
+      console.error('fetchFollowing error:', err);
+    }
+  };
+
+  // 关注/取消关注
+  const handleFollow = async (e: React.MouseEvent, targetUserId: string) => {
+    e.stopPropagation();
+
+    if (!currentUserId) {
+      showToast('请先登录', 'info');
+      return;
+    }
+
+    if (currentUserId === targetUserId) {
+      showToast('不能关注自己', 'error');
+      return;
+    }
+
+    const isFollowing = followingIds.has(targetUserId);
+
+    try {
+      if (isFollowing) {
+        // 取消关注
+        const { error } = await supabase
+          .from('user_follows')
+          .delete()
+          .eq('follower_id', currentUserId)
+          .eq('following_id', targetUserId);
+
+        if (error) {
+          console.error('取消关注失败:', error);
+          showToast('操作失败，请重试', 'error');
+          return;
+        }
+
+        setFollowingIds(prev => {
+          const next = new Set(prev);
+          next.delete(targetUserId);
+          return next;
+        });
+        showToast('已取消关注', 'success');
+      } else {
+        // 关注
+        const { error } = await supabase
+          .from('user_follows')
+          .insert([{ follower_id: currentUserId, following_id: targetUserId }]);
+
+        if (error) {
+          console.error('关注失败:', error);
+          showToast('操作失败，请重试', 'error');
+          return;
+        }
+
+        setFollowingIds(prev => new Set([...prev, targetUserId]));
+        showToast('关注成功', 'success');
+      }
+    } catch (err) {
+      console.error('handleFollow error:', err);
+      showToast('操作失败，请重试', 'error');
+    }
+  };
+
+  const fetchRecommendedUsers = async () => {
+    try {
+      // 1. 从 topics 表统计每个用户的总浏览量
+      const { data: topicsData, error: topicsError } = await supabase
+        .from('topics')
+        .select('user_id, views_count')
+        .eq('published', true);
+
+      if (topicsError) {
+        console.error('获取话题数据失败:', topicsError);
+        setRecommendedUsers([]);
+        return;
+      }
+
+      // 2. 按 user_id 聚合总浏览量
+      const userViewsMap = new Map<string, number>();
+      if (topicsData) {
+        (topicsData as any[]).forEach(t => {
+          if (!t.user_id) return;
+          const current = userViewsMap.get(t.user_id) || 0;
+          userViewsMap.set(t.user_id, current + (t.views_count || 0));
+        });
+      }
+
+      // 3. 如果没有话题数据，显示空
+      if (userViewsMap.size === 0) {
+        setRecommendedUsers([]);
+        return;
+      }
+
+      // 4. 按浏览量排序，取前5名用户ID
+      const topUserIds = [...userViewsMap.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(entry => entry[0]);
+
+      // 5. 从 profiles 表获取这些用户的资料
+      const { data: profiles, error: profilesError } = await supabase
+        .from('profiles')
+        .select('id, full_name, avatar_url, is_admin')
+        .in('id', topUserIds);
+
+      if (profilesError) {
+        console.error('获取用户资料失败:', profilesError);
+        setRecommendedUsers([]);
+        return;
+      }
+
+      if (!profiles || profiles.length === 0) {
+        setRecommendedUsers([]);
+        return;
+      }
+
+      // 6. 按浏览量顺序排序用户
+      const sortedProfiles = topUserIds.map(uid => 
+        (profiles as any[]).find(p => p.id === uid)
+      ).filter(Boolean);
+
+      // 7. 转换为 RecommendedUser 格式
+      const result = sortedProfiles.map((p, idx) => ({
+        id: idx + 1,
+        user_id: p.id,
+        display_name: p.full_name || '匿名用户',
+        avatar_url: p.avatar_url || '',
+        role: p.is_admin ? '管理员' : '用户',
+        followers_count: 0,
+        is_active: true,
+        order_index: idx
+      }));
+
+      setRecommendedUsers(result as RecommendedUser[]);
+    } catch (err) {
+      console.error('fetchRecommendedUsers error:', err);
     }
   };
 
   useEffect(() => {
     const init = async () => {
       const { data } = await supabase.auth.getUser();
-      setCurrentUserId(data?.user?.id || null);
-      // 并行请求，提高加载速度
+      const uid = data?.user?.id || null;
+      setCurrentUserId(uid);
+
+      // 并行请求
       await Promise.all([
         fetchTopics(),
         fetchHotTopics(),
         fetchRecommendedUsers()
       ]);
+
+      // 获取关注列表
+      if (uid) {
+        await fetchFollowing(uid);
+      }
     };
     init();
   }, []);
@@ -324,10 +502,37 @@ export const Square: React.FC<SquareProps> = ({ onTopicSelect }) => {
                     <textarea
                       value={form.content}
                       onChange={(e) => setForm({ ...form, content: e.target.value })}
-                      placeholder="分享你的想法、经验或见解..."
+                      placeholder="分享你的想法、经验或见解...&#10;支持 Markdown 格式，也可上传 .md 文件"
                       rows={6}
-                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 mt-2 text-sm text-white focus:outline-none focus:border-cyan-500"
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 mt-2 text-sm text-white focus:outline-none focus:border-cyan-500 font-mono"
                     />
+                    {/* Markdown 文件上传区域 */}
+                    <div className="mt-3">
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept=".md,text/markdown"
+                        onChange={handleFileUpload}
+                        className="hidden"
+                      />
+                      <div
+                        onClick={() => fileInputRef.current?.click()}
+                        className="border-2 border-dashed border-slate-600 rounded-lg p-4 hover:border-cyan-500/50 hover:bg-slate-800/50 transition-colors cursor-pointer flex items-center justify-center gap-3"
+                      >
+                        <Upload size={20} className="text-slate-400" />
+                        <span className="text-sm text-slate-400">
+                          {uploadedFileName ? (
+                            <span className="text-cyan-400 flex items-center gap-2">
+                              <FileText size={16} />
+                              已上传：{uploadedFileName}
+                            </span>
+                          ) : (
+                            '点击上传 Markdown 文件（.md）'
+                          )}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-500 mt-2">支持 .md 格式，文件内容将自动填充到上方输入框</p>
+                    </div>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
@@ -352,18 +557,6 @@ export const Square: React.FC<SquareProps> = ({ onTopicSelect }) => {
                         placeholder="如：技术先锋"
                         className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 mt-2 text-sm text-white focus:outline-none focus:border-cyan-500"
                       />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="text-sm text-slate-300">图片 URL（可选）</label>
-                    <div className="relative mt-2">
-                      <input
-                        value={form.image_url}
-                        onChange={(e) => setForm({ ...form, image_url: e.target.value })}
-                        placeholder="https://..."
-                        className="w-full bg-slate-800 border border-slate-700 rounded-lg pl-10 pr-4 py-3 text-sm text-white focus:outline-none focus:border-cyan-500"
-                      />
-                      <Image size={18} className="absolute left-3 top-3 text-slate-400" />
                     </div>
                   </div>
                   <div className="flex items-center justify-end gap-3 pt-2">
@@ -580,8 +773,15 @@ export const Square: React.FC<SquareProps> = ({ onTopicSelect }) => {
                               )}
                            </div>
                         </div>
-                        <button className="text-xs bg-slate-700 text-cyan-400 px-3 py-1.5 rounded-full border border-slate-600 hover:bg-cyan-600 hover:text-white hover:border-cyan-500 transition-all font-medium">
-                           关注
+                        <button
+                          onClick={(e) => handleFollow(e, user.user_id)}
+                          className={`text-xs px-3 py-1.5 rounded-full border transition-all font-medium ${
+                            followingIds.has(user.user_id)
+                              ? 'bg-slate-600 text-slate-300 border-slate-500 hover:bg-rose-900/30 hover:text-rose-400 hover:border-rose-500/50'
+                              : 'bg-slate-700 text-cyan-400 border-slate-600 hover:bg-cyan-600 hover:text-white hover:border-cyan-500'
+                          }`}
+                        >
+                          {followingIds.has(user.user_id) ? '已关注' : '关注'}
                         </button>
                      </li>
                      ))

@@ -8,7 +8,8 @@ export enum Page {
   REGISTER = 'register',
   PROFILE = 'profile',
   RESET_PASSWORD = 'reset-password',
-  PROGRESS_REMINDERS = 'progress-reminders'
+  PROGRESS_REMINDERS = 'progress-reminders',
+  USER_MANAGEMENT = 'user-management'
 }
 
 export interface Competition {
@@ -171,5 +172,17 @@ export interface MarketProductInquiry {
   contact_method: string;
   message?: string;
   status: string;
+  created_at: string;
+}
+
+export interface Notification {
+  id: number;
+  user_id: string;
+  type: string;
+  title: string;
+  content: string;
+  related_id?: string;
+  related_link?: string;
+  is_read: boolean;
   created_at: string;
 }

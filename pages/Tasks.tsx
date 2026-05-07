@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState, useRef } from 'react';
 import { supabase } from '../src/supabaseClient';
 import {
-  Plus, Clock, Home, X, Upload, Trash2, Smartphone, MessageCircle, ChevronDown, CheckCircle2, AlertCircle, EyeOff, AlertTriangle, RefreshCw
+  Plus, Clock, Home, X, Upload, Trash2, Smartphone, MessageCircle, ChevronDown, CheckCircle2, AlertCircle, EyeOff, AlertTriangle, RefreshCw, Users, XCircle, Check
 } from 'lucide-react';
 import {
   createGroupChat,
@@ -12,6 +12,17 @@ import {
 // --- 类型定义 ---
 type TaskType = 'bounty' | 'team';
 type DomainType = '家装' | '农业' | '能源' | '职场' | '健康' | '宠物';
+
+// 组队加入申请
+interface TeamJoinRequest {
+  id: number;
+  task_id: string;
+  claimant_id: string;
+  claimant_nickname: string;
+  claimed_at: string;
+  join_status: 'pending' | 'approved' | 'rejected';
+  join_request_at: string;
+}
 
 interface TaskItem {
   id: string;
@@ -31,6 +42,9 @@ interface TaskItem {
   confirmedByPublisher?: boolean;
   completedAt?: string;
   isCompleted?: boolean;
+  // 组队相关字段
+  teamSize?: number;
+  currentTeamCount?: number;
 }
 
 // --- 倒计时计算工具函数 ---
@@ -103,16 +117,20 @@ export const Tasks: React.FC<TasksProps> = ({ onOpenChat, onOpenGroupChat }) => 
     isOpen: boolean;
     title: string;
     desc: string;
-    actionType: 'delete' | 'off' | 'renew' | 'claim' | 'confirm_completion' | 'confirm_publisher';
+    actionType: 'delete' | 'off' | 'renew' | 'claim' | 'confirm_completion' | 'confirm_publisher' | 'team_join_request' | 'approve_join' | 'reject_join';
     taskId: string;
+    requestId?: number;
   }>({ isOpen: false, title: '', desc: '', actionType: 'off', taskId: '' });
+
+  // 组队申请列表
+  const [teamJoinRequests, setTeamJoinRequests] = useState<TeamJoinRequest[]>([]);
 
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [postTab, setPostTab] = useState<TaskType>('bounty');
   const [postSubmitting, setPostSubmitting] = useState(false);
   const [postForm, setPostForm] = useState({
-    title: '', domain: '家装' as DomainType, reward: '', desc: '', wechat: '', phone: '', qrFile: null as File | null, qrPreview: ''
+    title: '', domain: '家装' as DomainType, reward: '', desc: '', wechat: '', phone: '', qrFile: null as File | null, qrPreview: '', teamSize: ''
   });
 
   const showNotice = (msg: string, type: 'success' | 'error' = 'success') => {
@@ -142,6 +160,31 @@ export const Tasks: React.FC<TasksProps> = ({ onOpenChat, onOpenGroupChat }) => 
         const task = tasks.find(t => t.id === pendingTaskId);
         if (task && task.isOwner && task.confirmedByClaimant && !task.confirmedByPublisher) {
           handlePublisherConfirmCompletion(task);
+        }
+      }, 1000);
+    }
+  }, [tasks]);
+
+  // --- 1.6 获取组队申请列表（当打开任务详情且是任务发起者时） ---
+  useEffect(() => {
+    if (isDetailModalOpen && selectedTask && selectedTask.isOwner && selectedTask.type === 'team') {
+      fetchTeamJoinRequests(selectedTask.id);
+    }
+  }, [isDetailModalOpen, selectedTask]);
+
+  // --- 1.7 处理从通知跳转来的组队申请请求 ---
+  useEffect(() => {
+    const pendingTeamJoinTaskId = localStorage.getItem('pendingTeamJoinTaskId');
+    if (pendingTeamJoinTaskId) {
+      // 清除存储的任务ID
+      localStorage.removeItem('pendingTeamJoinTaskId');
+
+      // 等待任务加载完成后，打开任务详情
+      setTimeout(() => {
+        const task = tasks.find(t => t.id === pendingTeamJoinTaskId);
+        if (task && task.isOwner) {
+          setSelectedTask(task);
+          setIsDetailModalOpen(true);
         }
       }, 1000);
     }
@@ -198,7 +241,9 @@ export const Tasks: React.FC<TasksProps> = ({ onOpenChat, onOpenGroupChat }) => 
             confirmedByClaimant: row.confirmed_by_claimant || false,
             confirmedByPublisher: row.confirmed_by_publisher || false,
             completedAt: row.completed_at ? new Date(row.completed_at as string).toLocaleString('zh-CN') : undefined,
-            isCompleted: row.completed || false
+            isCompleted: row.completed || false,
+            teamSize: row.team_size || 0,
+            currentTeamCount: row.current_team_count || 1
           };
         });
 
@@ -314,6 +359,9 @@ export const Tasks: React.FC<TasksProps> = ({ onOpenChat, onOpenGroupChat }) => 
       if (actionType === 'claim') {
         // 接单确认：直接调用 confirmClaim
         await confirmClaim();
+      } else if (actionType === 'team_join_request') {
+        // 组队申请：调用提交申请函数
+        await submitTeamJoinRequest();
       } else if (actionType === 'confirm_completion') {
         // 接单者确认完成
         await executeClaimantConfirmation(taskId);
@@ -387,6 +435,48 @@ export const Tasks: React.FC<TasksProps> = ({ onOpenChat, onOpenGroupChat }) => 
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) { showNotice('请先登录', 'error'); return; }
 
+      // 组队任务特殊处理
+      if (task.type === 'team') {
+        // 检查队伍是否已满
+        const currentCount = task.currentTeamCount || 1;
+        const teamSize = task.teamSize || 2;
+        if (currentCount >= teamSize) {
+          showNotice('队伍人数已满，无法加入', 'error');
+          return;
+        }
+
+        // 检查是否已经申请过
+        const { data: existingRequest } = await supabase
+          .from('task_claims')
+          .select('id, join_status')
+          .eq('claimant_id', user.id)
+          .eq('task_id', task.id)
+          .in('join_status', ['pending', 'approved'])
+          .limit(1);
+
+        if (existingRequest && existingRequest.length > 0) {
+          const existing = existingRequest[0];
+          if (existing.join_status === 'pending') {
+            showNotice('您已提交过申请，请等待审核', 'error');
+          } else {
+            showNotice('您已在队伍中', 'error');
+          }
+          return;
+        }
+
+        // 显示组队申请确认框
+        setPendingClaimTask(task);
+        setConfirmConfig({
+          isOpen: true,
+          taskId: task.id,
+          actionType: 'team_join_request',
+          title: '申请加入队伍',
+          desc: '您的申请将发送给任务发起者审核，请等待审核结果。'
+        });
+        return;
+      }
+
+      // 悬赏任务走原有逻辑
       const start = new Date(); start.setHours(0, 0, 0, 0);
       const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
 
@@ -415,6 +505,130 @@ export const Tasks: React.FC<TasksProps> = ({ onOpenChat, onOpenGroupChat }) => 
       });
     } catch (err: unknown) {
       showNotice(err instanceof Error ? err.message : '接单失败', 'error');
+    }
+  };
+
+  // 提交组队申请
+  const submitTeamJoinRequest = async () => {
+    if (!pendingClaimTask) return;
+    setConfirmingClaim(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) { showNotice('请先登录', 'error'); setConfirmingClaim(false); return; }
+
+      // 获取用户昵称
+      const meta = user.user_metadata || {};
+      const nickname = meta.nickname || user.email?.split('@')[0] || '匿名用户';
+
+      const { error: insertErr } = await supabase.from('task_claims').insert([{
+        claimant_id: user.id,
+        task_id: pendingClaimTask.id,
+        claimed_at: new Date().toISOString(),
+        join_status: 'pending',
+        join_request_at: new Date().toISOString(),
+        claimant_nickname: nickname
+      }]);
+
+      if (insertErr) throw insertErr;
+
+      showNotice('申请已提交，请等待发起者审核', 'success');
+      setPendingClaimTask(null);
+      setConfirmConfig(prev => ({ ...prev, isOpen: false }));
+      fetchTasks();
+    } catch (err: unknown) {
+      showNotice(err instanceof Error ? err.message : '申请失败', 'error');
+    } finally {
+      setConfirmingClaim(false);
+    }
+  };
+
+  // 获取组队申请列表（用于任务发起者）
+  const fetchTeamJoinRequests = async (taskId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('task_claims')
+        .select('*')
+        .eq('task_id', taskId)
+        .eq('join_status', 'pending')
+        .order('join_request_at', { ascending: true });
+
+      if (!error && data) {
+        setTeamJoinRequests(data as TeamJoinRequest[]);
+      }
+    } catch (err) {
+      console.error('获取组队申请失败:', err);
+    }
+  };
+
+  // 同意组队申请
+  const approveTeamJoin = async (request: TeamJoinRequest) => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) { showNotice('请先登录', 'error'); return; }
+
+      const { error } = await supabase
+        .from('task_claims')
+        .update({
+          join_status: 'approved',
+          join_reviewed_at: new Date().toISOString(),
+          reviewed_by: user.id
+        })
+        .eq('id', request.id);
+
+      if (error) throw error;
+
+      // 创建群聊
+      try {
+        const existingGroupId = await getExistingGroupChat(request.task_id);
+        if (!existingGroupId) {
+          const publisherNickname = await getUserNickname(selectedTask?.user_id || '');
+          await createGroupChat(
+            request.task_id,
+            selectedTask?.title || '组队任务',
+            selectedTask?.user_id || '',
+            publisherNickname,
+            request.claimant_id,
+            request.claimant_nickname || '新成员'
+          );
+        }
+      } catch (botError) {
+        console.error('创建群聊失败:', botError);
+      }
+
+      showNotice('已同意加入申请', 'success');
+      fetchTasks();
+      if (selectedTask) {
+        fetchTeamJoinRequests(selectedTask.id);
+      }
+    } catch (err: unknown) {
+      showNotice(err instanceof Error ? err.message : '操作失败', 'error');
+    }
+  };
+
+  // 拒绝组队申请
+  const rejectTeamJoin = async (request: TeamJoinRequest) => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) { showNotice('请先登录', 'error'); return; }
+
+      const { error } = await supabase
+        .from('task_claims')
+        .update({
+          join_status: 'rejected',
+          join_reviewed_at: new Date().toISOString(),
+          reviewed_by: user.id
+        })
+        .eq('id', request.id);
+
+      if (error) throw error;
+
+      showNotice('已拒绝申请', 'success');
+      fetchTasks();
+      if (selectedTask) {
+        fetchTeamJoinRequests(selectedTask.id);
+      }
+    } catch (err: unknown) {
+      showNotice(err instanceof Error ? err.message : '操作失败', 'error');
     }
   };
 
@@ -635,13 +849,15 @@ export const Tasks: React.FC<TasksProps> = ({ onOpenChat, onOpenGroupChat }) => 
         reward: postForm.reward.trim() || '0',
         contact: contactStr,
         is_active: true,
-        created_at: new Date().toISOString()
+        created_at: new Date().toISOString(),
+        team_size: postTab === 'team' ? parseInt(postForm.teamSize) || 2 : 0,
+        current_team_count: 1 // 发布者自己算1人
       }]);
 
       if (error) throw error;
       showNotice('任务发布成功');
       setIsPostModalOpen(false);
-      setPostForm({ title: '', domain: '家装', reward: '', desc: '', wechat: '', phone: '', qrFile: null, qrPreview: '' });
+      setPostForm({ title: '', domain: '家装', reward: '', desc: '', wechat: '', phone: '', qrFile: null, qrPreview: '', teamSize: '' });
       fetchTasks();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -768,7 +984,15 @@ export const Tasks: React.FC<TasksProps> = ({ onOpenChat, onOpenGroupChat }) => 
                 >
                   <div className="flex justify-between items-start mb-4">
                     <div className="flex flex-col gap-2">
-                      <span className={`text-[10px] px-2 py-0.5 rounded border self-start ${task.type === 'bounty' ? 'text-yellow-500 border-yellow-500/20 bg-yellow-500/5' : 'text-orange-500 border-orange-500/20 bg-orange-500/5'}`}>{task.type === 'bounty' ? '💰 悬赏急单' : '🤝 组队合伙'}</span>
+                      <div className="flex items-center gap-2">
+                        <span className={`text-[10px] px-2 py-0.5 rounded border self-start ${task.type === 'bounty' ? 'text-yellow-500 border-yellow-500/20 bg-yellow-500/5' : 'text-orange-500 border-orange-500/20 bg-orange-500/5'}`}>{task.type === 'bounty' ? '💰 悬赏急单' : '🤝 组队合伙'}</span>
+                        {/* 组队任务显示队伍人数 */}
+                        {task.type === 'team' && task.teamSize && task.teamSize > 0 && (
+                          <span className="text-[10px] px-2 py-0.5 rounded border self-start text-cyan-500 border-cyan-500/20 bg-cyan-500/5">
+                            👥 {task.currentTeamCount || 1}/{task.teamSize}
+                          </span>
+                        )}
+                      </div>
                       {task.isCompleted && <span className="text-[10px] text-green-500 font-bold bg-green-500/10 px-2 py-0.5 rounded">✓ 已完成</span>}
                       {!task.isCompleted && task.confirmedByClaimant && <span className="text-[10px] text-blue-500 font-bold bg-blue-500/10 px-2 py-0.5 rounded">● 等待发布者确认</span>}
                       {isExpired && <span className="text-[10px] text-red-500 font-bold bg-red-500/10 px-2 py-0.5 rounded">● 任务已过期（大厅不可见）</span>}
@@ -828,7 +1052,17 @@ export const Tasks: React.FC<TasksProps> = ({ onOpenChat, onOpenGroupChat }) => 
                               <CheckCircle2 size={14} /> 确认完成
                             </button>
                           ) : !task.isCompleted && (
-                            <button disabled={isExpired || isInactive} onClick={() => handleClaim(task)} className={`text-sm font-bold ${isExpired || isInactive ? 'text-slate-600 cursor-not-allowed' : 'text-orange-500 hover:underline'}`}>立即接单</button>
+                            <button
+                              disabled={isExpired || isInactive || (task.type === 'team' && (task.currentTeamCount || 1) >= (task.teamSize || 2))}
+                              onClick={() => handleClaim(task)}
+                              className={`text-sm font-bold ${
+                                isExpired || isInactive ? 'text-slate-600 cursor-not-allowed' :
+                                task.type === 'team' && (task.currentTeamCount || 1) >= (task.teamSize || 2) ? 'text-slate-600 cursor-not-allowed' :
+                                'text-cyan-500 hover:underline'
+                              }`}
+                            >
+                              {task.type === 'team' ? '加入队伍' : '立即接单'}
+                            </button>
                           )}
                         </>
                       )}
@@ -894,6 +1128,23 @@ export const Tasks: React.FC<TasksProps> = ({ onOpenChat, onOpenGroupChat }) => 
                   <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={e => { const f = e.target.files?.[0]; if (f) setPostForm({...postForm, qrFile: f, qrPreview: URL.createObjectURL(f)}); }} />
                 </div>
               </div>
+              {/* 组队人数输入 - 仅组队任务显示 */}
+              {postTab === 'team' && (
+                <div className="space-y-2">
+                  <label className="text-[10px] uppercase tracking-widest font-bold text-slate-500 ml-1">组队人数上限</label>
+                  <input
+                    type="number"
+                    min="2"
+                    max="20"
+                    className="w-full bg-[#0f172a] border border-slate-700/50 rounded-2xl p-4 outline-none focus:border-cyan-500/50 transition-all text-slate-200"
+                    placeholder="需要招募的总人数（不含发起者）"
+                    value={postForm.teamSize}
+                    onChange={e => setPostForm({...postForm, teamSize: e.target.value})}
+                    required
+                  />
+                  <p className="text-[10px] text-slate-500 ml-1">当前队伍已有 1 人（发起者），还需招募 N 人</p>
+                </div>
+              )}
               <div className="space-y-2">
                 <label className="text-[10px] uppercase tracking-widest font-bold text-slate-500 ml-1">需求描述</label>
                 <textarea className="w-full bg-[#0f172a] border border-slate-700/50 rounded-2xl p-4 h-32 resize-none outline-none text-slate-200" placeholder="详细描述您的需求..." value={postForm.desc} onChange={e => setPostForm({...postForm, desc: e.target.value})} required />
@@ -987,6 +1238,58 @@ export const Tasks: React.FC<TasksProps> = ({ onOpenChat, onOpenGroupChat }) => 
                   </div>
                 </div>
               </div>
+
+              {/* 组队任务：显示申请列表（仅任务发起者可见） */}
+              {selectedTask.type === 'team' && selectedTask.isOwner && (
+                <div className="mb-8">
+                  <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center gap-2">
+                    <span className="w-1 h-4 bg-cyan-500 rounded-full"></span>
+                    组队申请
+                    {teamJoinRequests.length > 0 && (
+                      <span className="ml-2 px-2 py-0.5 bg-cyan-500/20 text-cyan-400 text-xs rounded-full">
+                        {teamJoinRequests.length} 待审核
+                      </span>
+                    )}
+                  </h3>
+                  <div className="bg-[#0f172a] rounded-2xl p-4 border border-slate-700/50">
+                    {teamJoinRequests.length === 0 ? (
+                      <div className="text-center text-slate-500 py-4">暂无待审核的申请</div>
+                    ) : (
+                      <div className="space-y-3">
+                        {teamJoinRequests.map(request => (
+                          <div key={request.id} className="flex items-center justify-between bg-slate-800/50 rounded-xl p-3">
+                            <div className="flex items-center gap-3">
+                              <div className="w-8 h-8 rounded-full bg-cyan-900/50 text-cyan-400 border border-cyan-500/30 flex items-center justify-center font-bold text-xs">
+                                {(request.claimant_nickname || '用户').charAt(0).toUpperCase()}
+                              </div>
+                              <div>
+                                <div className="text-sm text-white font-medium">{request.claimant_nickname || '匿名用户'}</div>
+                                <div className="text-xs text-slate-500">
+                                  申请时间：{new Date(request.join_request_at).toLocaleString('zh-CN')}
+                                </div>
+                              </div>
+                            </div>
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => approveTeamJoin(request)}
+                                className="px-3 py-1.5 bg-green-600 hover:bg-green-500 text-white text-xs font-bold rounded-lg flex items-center gap-1 transition-colors"
+                              >
+                                <Check size={14} /> 同意
+                              </button>
+                              <button
+                                onClick={() => rejectTeamJoin(request)}
+                                className="px-3 py-1.5 bg-red-600/50 hover:bg-red-600 text-white text-xs font-bold rounded-lg flex items-center gap-1 transition-colors"
+                              >
+                                <XCircle size={14} /> 拒绝
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* 底部操作栏 */}
@@ -1061,14 +1364,22 @@ export const Tasks: React.FC<TasksProps> = ({ onOpenChat, onOpenGroupChat }) => 
                       setIsDetailModalOpen(false);
                       handleClaim(selectedTask);
                     }}
-                    disabled={calculateTimeLeft(selectedTask.createdAt) === '已过期' || selectedTask.isActive === false}
+                    disabled={
+                      calculateTimeLeft(selectedTask.createdAt) === '已过期' ||
+                      selectedTask.isActive === false ||
+                      (selectedTask.type === 'team' && (selectedTask.currentTeamCount || 1) >= (selectedTask.teamSize || 2))
+                    }
                     className={`px-6 py-2.5 rounded-xl font-medium transition-colors ${
                       calculateTimeLeft(selectedTask.createdAt) === '已过期' || selectedTask.isActive === false
                         ? 'bg-slate-600 text-slate-400 cursor-not-allowed'
-                        : 'bg-orange-500 hover:bg-orange-600 text-white'
+                        : selectedTask.type === 'team' && (selectedTask.currentTeamCount || 1) >= (selectedTask.teamSize || 2)
+                          ? 'bg-slate-600 text-slate-400 cursor-not-allowed'
+                          : selectedTask.type === 'team'
+                            ? 'bg-cyan-600 hover:bg-cyan-500 text-white'
+                            : 'bg-orange-500 hover:bg-orange-600 text-white'
                     }`}
                   >
-                    立即接单
+                    {selectedTask.type === 'team' ? '加入队伍' : '立即接单'}
                   </button>
                 )}
               </div>
