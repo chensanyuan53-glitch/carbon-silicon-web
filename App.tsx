@@ -17,6 +17,8 @@ import { Profile } from './pages/Profile';
 import { ResetPassword } from './pages/ResetPassword';
 import { ProgressReminders } from './pages/ProgressReminders';
 import { UserManagement } from './pages/UserManagement';
+import { ArenaManagement } from './pages/ArenaManagement';
+import { TaskManagement } from './pages/TaskManagement';
 import { AIChat } from './components/AIChat';
 import { ChatDialog } from './components/ChatDialog';
 import { GroupChatDialog } from './components/GroupChatDialog';
@@ -149,6 +151,10 @@ function App() {
         return <ProgressReminders />;
       case Page.USER_MANAGEMENT:
         return <UserManagement onNavigate={setCurrentPage} />;
+      case Page.ARENA_MANAGEMENT:
+        return <ArenaManagement onNavigate={setCurrentPage} />;
+      case Page.TASK_MANAGEMENT:
+        return <TaskManagement onNavigate={setCurrentPage} />;
       default:
         return <Home onNavigate={setCurrentPage} onSetStationTab={setStationTab} />;
     }

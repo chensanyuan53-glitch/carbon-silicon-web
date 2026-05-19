@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import type { Session } from '@supabase/supabase-js';
-import { Trophy, Clock, Plus, X, Lightbulb, BarChart3, Zap, Users, Sparkles, Trash2, AlertTriangle } from 'lucide-react';
+import { Trophy, Clock, Plus, X, Lightbulb, BarChart3, Zap, Users, Sparkles, Trash2, AlertTriangle, Shield } from 'lucide-react';
 import { fetchArenas, createArena, deleteArena } from '../src/api/arena';
 import { Page } from '../types';
 import type { Arena as ArenaType } from '../types/supabase';
@@ -16,7 +16,7 @@ interface ArenaProps {
 }
 
 type ArenaMode = 'pitch' | 'benchmark' | 'speed' | null;
-type FilterMode = 'all' | 'recruiting' | 'reviewing' | 'finished';
+type FilterMode = 'all' | 'recruiting' | 'reviewing' | 'finished' | 'pending';
 
 const MODE_CONFIG = {
   pitch: {
@@ -110,6 +110,24 @@ export const Arena: React.FC<ArenaProps> = ({ session: sessionProp, onNavigate }
   const [deleting, setDeleting] = useState(false);
   const [toast, setToast] = useState<{ visible: boolean; message: string; type?: 'success' | 'error' }>({ visible: false, message: '' });
   const [now, setNow] = useState(Date.now());
+  const [isArenaAdmin, setIsArenaAdmin] = useState(false);
+
+  // Check arena admin status - 响应 session 变化
+  useEffect(() => {
+    const checkArenaAdmin = async () => {
+      if (!session?.user?.id) {
+        setIsArenaAdmin(false);
+        return;
+      }
+      const { data } = await supabase
+        .from('profiles')
+        .select('is_arena_admin')
+        .eq('id', session.user.id)
+        .single();
+      setIsArenaAdmin(data?.is_arena_admin || false);
+    };
+    checkArenaAdmin();
+  }, [session]);
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
@@ -143,9 +161,20 @@ export const Arena: React.FC<ArenaProps> = ({ session: sessionProp, onNavigate }
   }, []);
 
   const filteredArenas = useMemo(() => {
-    if (filterMode === 'all') return arenas;
-    return arenas.filter((a) => a.status === filterMode);
-  }, [arenas, filterMode]);
+    // 默认只显示已审核的竞技场
+    if (filterMode === 'all') {
+      // 管理员可以看到所有待审核的竞技场，创建者也可以看到自己的
+      if (isArenaAdmin) {
+        return arenas.filter((a) => a.is_approved || !a.is_approved);
+      }
+      return arenas.filter((a) => a.is_approved || a.creator_id === session?.user?.id);
+    }
+    if (filterMode === 'pending') {
+      // 待审核筛选：显示所有未审核的（仅管理员可见此选项）
+      return arenas.filter((a) => !a.is_approved);
+    }
+    return arenas.filter((a) => a.status === filterMode && a.is_approved);
+  }, [arenas, filterMode, session, isArenaAdmin]);
 
   const totalPrizePool = useMemo(() => {
     return arenas.reduce((sum, a) => sum + a.total_prize, 0);
@@ -181,17 +210,51 @@ export const Arena: React.FC<ArenaProps> = ({ session: sessionProp, onNavigate }
         total_prize: total,
         deadline: new Date(formData.deadline).toISOString(),
         mode: selectedMode,
+        is_approved: false, // 新发布的竞技场需要审核
       };
-      await createArena(input);
+      const arena = await createArena(input);
+
+      // 发送通知给所有审核管理员
+      await sendArenaPendingNotification(arena.id, arena.title);
+
       setCreateModalOpen(false);
       setCreateStep('mode');
       setSelectedMode(null);
       setFormData({ title: '', description: '', domain: '', contact_info: '', total_prize: '', deadline: '' });
       await loadArenas();
+      setToast({ visible: true, message: '提交成功，等待管理员审核', type: 'success' });
+      setTimeout(() => setToast({ visible: false, message: '' }), 3000);
     } catch (e) {
       setCreateError(e instanceof Error ? e.message : '发布失败');
     } finally {
       setCreateSubmitting(false);
+    }
+  };
+
+  // 发送竞技场待审核通知给所有审核管理员
+  const sendArenaPendingNotification = async (arenaId: number, arenaTitle: string) => {
+    try {
+      // 获取所有审核管理员
+      const { data: admins } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('is_arena_admin', true);
+
+      if (admins && admins.length > 0) {
+        const notifications = admins.map(admin => ({
+          user_id: admin.id,
+          type: 'arena_pending',
+          title: '新竞技场待审核',
+          content: `用户提交了新的竞技场"${arenaTitle}"，请及时审核`,
+          related_id: arenaId.toString(),
+          related_link: '/?page=arena-management',
+          is_read: false,
+        }));
+
+        await supabase.from('notifications').insert(notifications);
+      }
+    } catch (err) {
+      console.error('Failed to send arena pending notification:', err);
     }
   };
 
@@ -227,6 +290,11 @@ export const Arena: React.FC<ArenaProps> = ({ session: sessionProp, onNavigate }
         session={session}
         onBack={() => setSelectedArenaId(null)}
         onNavigate={onNavigate}
+        onApproveSuccess={() => {
+          loadArenas();
+          // 审核成功后切换到"全部"筛选，显示已审核的竞技场
+          setFilterMode('all');
+        }}
       />
     );
   }
@@ -301,6 +369,18 @@ export const Arena: React.FC<ArenaProps> = ({ session: sessionProp, onNavigate }
               </button>
             );
           })}
+          {isArenaAdmin && (
+            <button
+              onClick={() => setFilterMode('pending')}
+              className={`shrink-0 px-6 py-2.5 rounded-xl font-medium transition-all ${
+                filterMode === 'pending'
+                  ? 'bg-orange-500/20 text-orange-400 border border-orange-500/40 shadow-lg shadow-orange-500/10'
+                  : 'bg-slate-900/50 text-slate-400 border border-slate-700 hover:border-slate-600'
+              }`}
+            >
+              待审核
+            </button>
+          )}
           {session && (
             <button
               onClick={() => {
@@ -339,8 +419,14 @@ export const Arena: React.FC<ArenaProps> = ({ session: sessionProp, onNavigate }
               return (
                 <div
                   key={arena.id}
-                  onClick={() => setSelectedArenaId(arena.id)}
-                  className="group text-left rounded-2xl border transition-all p-6 bg-slate-900/50 backdrop-blur-md border-slate-700 hover:border-amber-500/50 hover:shadow-[0_0_20px_rgba(245,158,11,0.3)] hover:bg-slate-900/70 relative overflow-hidden cursor-pointer"
+                  onClick={() => (arena.is_approved || isArenaAdmin) && setSelectedArenaId(arena.id)}
+                  className={`group text-left rounded-2xl border transition-all p-6 bg-slate-900/50 backdrop-blur-md relative overflow-hidden ${
+                    !arena.is_approved && !isArenaAdmin
+                      ? 'border-slate-600 cursor-not-allowed opacity-60'
+                      : arena.is_approved
+                      ? 'border-slate-700 hover:border-amber-500/50 hover:shadow-[0_0_20px_rgba(245,158,11,0.3)] hover:bg-slate-900/70 cursor-pointer'
+                      : 'border-amber-500/30 cursor-pointer hover:border-amber-500/50'
+                  }`}
                 >
                   {/* Mode Badge */}
                   {mode && config && (
@@ -365,19 +451,25 @@ export const Arena: React.FC<ArenaProps> = ({ session: sessionProp, onNavigate }
                   </div>
 
                   {/* Status Badge */}
-                  {arena.status === 'finished' && (
+                  {!arena.is_approved ? (
+                    <div className="absolute top-4 right-16 px-3 py-1.5 rounded-full bg-slate-600/80 text-slate-300 border border-slate-500 text-xs font-medium flex items-center gap-1">
+                      <Clock size={12} />
+                      等待审核
+                    </div>
+                  ) : arena.status === 'finished' ? (
                     <div className="absolute top-4 right-16 px-3 py-1.5 rounded-full bg-slate-600/80 text-slate-300 border border-slate-500 text-xs font-medium">
                       已结束
                     </div>
-                  )}
-                  {arena.status === 'reviewing' && (
+                  ) : arena.status === 'reviewing' ? (
                     <div className="absolute top-4 right-16 px-3 py-1.5 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/40 text-xs font-medium">
                       评审中
                     </div>
-                  )}
+                  ) : null}
 
                   <div className="mt-12 mb-4">
-                    <h3 className="text-xl font-bold text-white group-hover:text-amber-300 transition-colors line-clamp-2 mb-2">
+                    <h3 className={`text-xl font-bold line-clamp-2 mb-2 ${
+                      !arena.is_approved ? 'text-slate-400' : 'text-white group-hover:text-amber-300 transition-colors'
+                    }`}>
                       {arena.title}
                     </h3>
                     {arena.domain && (

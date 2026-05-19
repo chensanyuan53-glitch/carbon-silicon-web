@@ -10,7 +10,8 @@ import {
   ShoppingBag,
   User,
   LogOut, // 3. 引入退出图标
-  Shield // 引入管理员图标
+  Shield, // 引入管理员图标
+  ClipboardList // 引入任务管理图标
 } from 'lucide-react';
 import { MessageDropdown } from './MessageDropdown';
 
@@ -38,19 +39,22 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPage, onNavigate, session
   const accountMenuRef = useRef<HTMLDivElement | null>(null);
   const [showDropdown, setShowDropdown] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [isArenaAdmin, setIsArenaAdmin] = useState(false);
 
-  // 检查是否为管理员
+  // 检查是否为管理员或审核管理员
   useEffect(() => {
     const checkAdmin = async () => {
       if (session?.user?.id) {
         const { data } = await supabase
           .from('profiles')
-          .select('is_admin')
+          .select('is_admin, is_arena_admin')
           .eq('id', session.user.id)
           .single();
         setIsAdmin(data?.is_admin || false);
+        setIsArenaAdmin(data?.is_arena_admin || false);
       } else {
         setIsAdmin(false);
+        setIsArenaAdmin(false);
       }
     };
     checkAdmin();
@@ -82,6 +86,10 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPage, onNavigate, session
     { id: Page.SQUARE, label: '广场', icon: MessageSquare },
     { id: Page.MARKET, label: '成果市集', icon: ShoppingBag },
     ...(isAdmin ? [{ id: Page.USER_MANAGEMENT, label: '用户管理', icon: Shield }] : []),
+    ...(isArenaAdmin ? [
+      { id: Page.ARENA_MANAGEMENT, label: '竞技场审核', icon: Trophy },
+      { id: Page.TASK_MANAGEMENT, label: '任务审核', icon: ClipboardList }
+    ] : []),
   ];
 
   // 5. 处理退出登录的逻辑
@@ -134,6 +142,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentPage, onNavigate, session
                 onOpenChat={onOpenChat}
                 onOpenGroupChat={onOpenGroupChat}
                 onTaskCompletionRequest={onTaskCompletionRequest}
+                onNavigate={(page) => onNavigate(page as Page)}
               />
             )}
 

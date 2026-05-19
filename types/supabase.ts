@@ -11,6 +11,9 @@ export interface Arena {
   deadline: string;
   status: 'recruiting' | 'reviewing' | 'finished' | string;
   mode: 'pitch' | 'benchmark' | 'speed' | null;
+  is_approved: boolean;
+  approved_at?: string | null;
+  approved_by?: string | null;
 }
 
 export interface ArenaSubmission {

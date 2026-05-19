@@ -17,6 +17,7 @@ export const Square: React.FC<SquareProps> = ({ onTopicSelect }) => {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Topic | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [isMainAdmin, setIsMainAdmin] = useState(false);
   const [form, setForm] = useState({
     title: '',
     content: '',
@@ -346,6 +347,16 @@ export const Square: React.FC<SquareProps> = ({ onTopicSelect }) => {
       const uid = data?.user?.id || null;
       setCurrentUserId(uid);
 
+      // 获取当前用户的管理员状态
+      if (uid) {
+        const { data: profileData } = await supabase
+          .from('profiles')
+          .select('is_admin')
+          .eq('id', uid)
+          .single();
+        setIsMainAdmin(profileData?.is_admin || false);
+      }
+
       // 并行请求
       await Promise.all([
         fetchTopics(),
@@ -419,11 +430,26 @@ export const Square: React.FC<SquareProps> = ({ onTopicSelect }) => {
 
   const confirmDelete = async () => {
     if (!deleteTarget || !currentUserId) return;
-    const { error } = await supabase
-      .from('topics')
-      .delete()
-      .eq('id', deleteTarget.id)
-      .eq('user_id', currentUserId);
+
+    // 主管理员可以删除所有话题，普通用户只能删除自己的话题
+    let error;
+    if (isMainAdmin) {
+      // 主管理员直接删除，无需验证user_id
+      const result = await supabase
+        .from('topics')
+        .delete()
+        .eq('id', deleteTarget.id);
+      error = result.error;
+    } else {
+      // 普通用户只能删除自己发布的话题
+      const result = await supabase
+        .from('topics')
+        .delete()
+        .eq('id', deleteTarget.id)
+        .eq('user_id', currentUserId);
+      error = result.error;
+    }
+
     if (error) {
       console.error('delete topic error', error);
       showToast('删除失败，请稍后重试', 'error');
@@ -580,8 +606,13 @@ export const Square: React.FC<SquareProps> = ({ onTopicSelect }) => {
             <div className="absolute inset-0 bg-black/60" onClick={() => { setShowDeleteModal(false); setDeleteTarget(null); }} />
             <div className="relative w-full max-w-md mx-4">
               <div className="bg-slate-800 rounded-2xl border border-slate-700 p-6 shadow-xl">
-                <h3 className="text-2xl font-bold text-white mb-2">确认删除话题</h3>
-                <p className="text-slate-300 mb-6">确定要删除话题"{deleteTarget.title}"吗？此操作不可撤销。</p>
+                <h3 className="text-2xl font-bold text-white mb-2">{isMainAdmin ? '管理员删除话题' : '确认删除话题'}</h3>
+                <p className="text-slate-300 mb-6">
+                  {isMainAdmin
+                    ? `您正在以管理员身份删除话题"${deleteTarget.title}"，此操作不可撤销。`
+                    : `确定要删除话题"${deleteTarget.title}"吗？此操作不可撤销。`
+                  }
+                </p>
                 <div className="flex items-center justify-end gap-3">
                   <button onClick={() => { setShowDeleteModal(false); setDeleteTarget(null); }} className="px-4 py-2 rounded-full bg-slate-700 text-slate-300 hover:text-white transition-colors">取消</button>
                   <button
@@ -679,11 +710,11 @@ export const Square: React.FC<SquareProps> = ({ onTopicSelect }) => {
                         )}
                      </div>
 
-                     {currentUserId === topic.user_id && (
+                     {(currentUserId === topic.user_id || isMainAdmin) && (
                        <button
                          onClick={(e) => handleDelete(e, topic)}
                          className="absolute bottom-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity p-2 rounded-lg bg-rose-900/80 border border-rose-600 hover:bg-rose-700 text-rose-300"
-                         title="删除话题"
+                         title={isMainAdmin ? '管理员删除话题' : '删除话题'}
                        >
                          <Trash size={14} />
                        </button>

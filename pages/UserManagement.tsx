@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { supabase } from '../src/supabaseClient';
 import { Page } from '../types';
-import { Shield, Users, Search, CheckCircle, XCircle, Loader2 } from 'lucide-react';
+import { Shield, Users, Search, CheckCircle, XCircle, Loader2, Trophy, ChevronDown } from 'lucide-react';
 
 interface UserProfile {
   id: string;
@@ -9,6 +9,7 @@ interface UserProfile {
   full_name: string | null;
   avatar_url: string | null;
   is_admin: boolean;
+  is_arena_admin: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -55,7 +56,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigate }) =>
       setLoading(true);
       const { data, error } = await supabase
         .from('profiles')
-        .select('id, email, full_name, avatar_url, is_admin, created_at, updated_at')
+        .select('id, email, full_name, avatar_url, is_admin, is_arena_admin, created_at, updated_at')
         .order('created_at', { ascending: false });
 
       if (!error && data) {
@@ -94,16 +95,43 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigate }) =>
     setUpdatingUserId(userId);
     const { error } = await supabase
       .from('profiles')
-      .update({ is_admin: makeAdmin })
+      .update({ is_admin: makeAdmin, is_arena_admin: false })
       .eq('id', userId);
 
     if (error) {
       setNotification({ type: 'error', message: `设置失败: ${error.message}` });
     } else {
-      setUsers(users.map((u) => (u.id === userId ? { ...u, is_admin: makeAdmin } : u)));
+      setUsers(users.map((u) => (u.id === userId ? { ...u, is_admin: makeAdmin, is_arena_admin: false } : u)));
       setNotification({
         type: 'success',
-        message: makeAdmin ? '已设置为管理员' : '已取消管理员权限',
+        message: makeAdmin ? '已设置为主管理员' : '已取消主管理员权限',
+      });
+    }
+    setUpdatingUserId(null);
+    setTimeout(() => setNotification(null), 3000);
+  };
+
+  // 设置/取消审核管理员
+  const toggleArenaAdmin = async (userId: string, makeArenaAdmin: boolean) => {
+    if (userId === currentAdmin) {
+      setNotification({ type: 'error', message: '不能修改自己的审核管理员权限' });
+      setTimeout(() => setNotification(null), 3000);
+      return;
+    }
+
+    setUpdatingUserId(userId);
+    const { error } = await supabase
+      .from('profiles')
+      .update({ is_arena_admin: makeArenaAdmin })
+      .eq('id', userId);
+
+    if (error) {
+      setNotification({ type: 'error', message: `设置失败: ${error.message}` });
+    } else {
+      setUsers(users.map((u) => (u.id === userId ? { ...u, is_arena_admin: makeArenaAdmin } : u)));
+      setNotification({
+        type: 'success',
+        message: makeArenaAdmin ? '已设置为审核管理员' : '已取消审核管理员权限',
       });
     }
     setUpdatingUserId(null);
@@ -154,7 +182,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigate }) =>
       )}
 
       {/* Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
         <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-6">
           <div className="flex items-center gap-4">
             <div className="w-12 h-12 rounded-lg bg-blue-900/50 flex items-center justify-center">
@@ -172,9 +200,22 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigate }) =>
               <Shield className="w-6 h-6 text-cyan-400" />
             </div>
             <div>
-              <p className="text-slate-400 text-sm">管理员数量</p>
+              <p className="text-slate-400 text-sm">主管理员</p>
               <p className="text-2xl font-bold text-white">
                 {users.filter((u) => u.is_admin).length}
+              </p>
+            </div>
+          </div>
+        </div>
+        <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-6">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 rounded-lg bg-amber-900/50 flex items-center justify-center">
+              <Trophy className="w-6 h-6 text-amber-400" />
+            </div>
+            <div>
+              <p className="text-slate-400 text-sm">审核管理员</p>
+              <p className="text-2xl font-bold text-white">
+                {users.filter((u) => u.is_arena_admin && !u.is_admin).length}
               </p>
             </div>
           </div>
@@ -187,7 +228,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigate }) =>
             <div>
               <p className="text-slate-400 text-sm">普通用户</p>
               <p className="text-2xl font-bold text-white">
-                {users.filter((u) => !u.is_admin).length}
+                {users.filter((u) => !u.is_admin && !u.is_arena_admin).length}
               </p>
             </div>
           </div>
@@ -261,7 +302,12 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigate }) =>
                       {user.is_admin ? (
                         <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-cyan-900/30 text-cyan-400 text-xs font-medium border border-cyan-700">
                           <Shield className="w-3 h-3" />
-                          管理员
+                          主管理员
+                        </span>
+                      ) : user.is_arena_admin ? (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-amber-900/30 text-amber-400 text-xs font-medium border border-amber-700">
+                          <Trophy className="w-3 h-3" />
+                          审核管理员
                         </span>
                       ) : (
                         <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-slate-700 text-slate-300 text-xs font-medium">
@@ -273,30 +319,71 @@ export const UserManagement: React.FC<UserManagementProps> = ({ onNavigate }) =>
                     <td className="px-6 py-4 text-right">
                       {user.id === currentAdmin ? (
                         <span className="text-slate-500 text-sm">当前用户</span>
-                      ) : (
+                      ) : user.is_admin ? (
                         <button
-                          onClick={() => toggleAdmin(user.id, !user.is_admin)}
+                          onClick={() => toggleAdmin(user.id, false)}
                           disabled={updatingUserId === user.id}
-                          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                            user.is_admin
-                              ? 'bg-red-900/30 text-red-400 hover:bg-red-900/50 border border-red-700'
-                              : 'bg-cyan-900/30 text-cyan-400 hover:bg-cyan-900/50 border border-cyan-700'
-                          }`}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed bg-red-900/30 text-red-400 hover:bg-red-900/50 border border-red-700"
                         >
                           {updatingUserId === user.id ? (
                             <Loader2 className="w-4 h-4 animate-spin" />
-                          ) : user.is_admin ? (
-                            <>
-                              <XCircle className="w-4 h-4" />
-                              取消权限
-                            </>
                           ) : (
                             <>
-                              <CheckCircle className="w-4 h-4" />
-                              设为管理员
+                              <XCircle className="w-4 h-4" />
+                              取消主管理员
                             </>
                           )}
                         </button>
+                      ) : user.is_arena_admin ? (
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            onClick={() => toggleAdmin(user.id, true)}
+                            disabled={updatingUserId === user.id}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed bg-cyan-900/30 text-cyan-400 hover:bg-cyan-900/50 border border-cyan-700"
+                          >
+                            <Shield className="w-4 h-4" />
+                            升级为主管理员
+                          </button>
+                          <button
+                            onClick={() => toggleArenaAdmin(user.id, false)}
+                            disabled={updatingUserId === user.id}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed bg-red-900/30 text-red-400 hover:bg-red-900/50 border border-red-700"
+                          >
+                            {updatingUserId === user.id ? (
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <>
+                                <XCircle className="w-4 h-4" />
+                                取消权限
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            onClick={() => toggleAdmin(user.id, true)}
+                            disabled={updatingUserId === user.id}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed bg-cyan-900/30 text-cyan-400 hover:bg-cyan-900/50 border border-cyan-700"
+                          >
+                            {updatingUserId === user.id ? (
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <>
+                                <Shield className="w-4 h-4" />
+                                设为主管理员
+                              </>
+                            )}
+                          </button>
+                          <button
+                            onClick={() => toggleArenaAdmin(user.id, true)}
+                            disabled={updatingUserId === user.id}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed bg-amber-900/30 text-amber-400 hover:bg-amber-900/50 border border-amber-700"
+                          >
+                            <Trophy className="w-4 h-4" />
+                            设为审核管理员
+                          </button>
+                        </div>
                       )}
                     </td>
                   </tr>

@@ -67,9 +67,10 @@ interface MessageDropdownProps {
     currentUserId: string;
   }) => void;
   onTaskCompletionRequest?: (taskId: string) => void;
+  onNavigate?: (page: string) => void;
 }
 
-export const MessageDropdown: React.FC<MessageDropdownProps> = ({ currentUserId, onOpenChat, onOpenGroupChat, onTaskCompletionRequest }) => {
+export const MessageDropdown: React.FC<MessageDropdownProps> = ({ currentUserId, onOpenChat, onOpenGroupChat, onTaskCompletionRequest, onNavigate }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<'messages' | 'notifications'>('messages');
   const [unreadCount, setUnreadCount] = useState(0);
@@ -476,6 +477,20 @@ export const MessageDropdown: React.FC<MessageDropdownProps> = ({ currentUserId,
     // 处理组队申请通知
     if (notification.type === 'team_join_request' && notification.related_link) {
       window.location.href = notification.related_link;
+      setIsOpen(false);
+      return;
+    }
+
+    // 处理竞技场待审核通知
+    if (notification.type === 'arena_pending' && onNavigate) {
+      onNavigate('arena-management');
+      setIsOpen(false);
+      return;
+    }
+
+    // 处理任务待审核通知
+    if (notification.type === 'task_pending' && onNavigate) {
+      onNavigate('task-management');
       setIsOpen(false);
       return;
     }

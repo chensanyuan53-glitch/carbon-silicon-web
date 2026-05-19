@@ -37,6 +37,7 @@ interface TaskItem {
   user_id: string;
   isOwner?: boolean;
   isActive?: boolean;
+  isApproved?: boolean;
   // 完成确认相关字段
   confirmedByClaimant?: boolean;
   confirmedByPublisher?: boolean;
@@ -201,6 +202,18 @@ export const Tasks: React.FC<TasksProps> = ({ onOpenChat, onOpenGroupChat }) => 
       if (isNewUser) {
         showNotice('新注册用户需等待 24 小时方可解锁大额任务。', 'error');
       }
+
+      // 检查是否为审核管理员
+      let isTaskAdmin = false;
+      if (user) {
+        const { data: profileData } = await supabase
+          .from('profiles')
+          .select('is_arena_admin')
+          .eq('id', user.id)
+          .single();
+        isTaskAdmin = profileData?.is_arena_admin || false;
+      }
+
       const { data, error } = await supabase
         .from('tasks_reward')
         .select('*')
@@ -238,6 +251,7 @@ export const Tasks: React.FC<TasksProps> = ({ onOpenChat, onOpenGroupChat }) => 
             user_id: String(row.user_id ?? ''),
             isOwner: user?.id === row.user_id,
             isActive: row.is_active !== false,
+            isApproved: row.is_approved !== false, // 默认true，只有明确为false时才是待审核
             confirmedByClaimant: row.confirmed_by_claimant || false,
             confirmedByPublisher: row.confirmed_by_publisher || false,
             completedAt: row.completed_at ? new Date(row.completed_at as string).toLocaleString('zh-CN') : undefined,
@@ -254,6 +268,12 @@ export const Tasks: React.FC<TasksProps> = ({ onOpenChat, onOpenGroupChat }) => 
           const isExpired = new Date(t.createdAt).getTime() + 12 * 60 * 60 * 1000 < now;
           // 过期的非本人任务不显示
           return t.isOwner || !isExpired;
+        });
+
+        // 审核过滤：只显示已审核通过的任务，除非是任务发布者或审核管理员
+        filteredByExpiry = filteredByExpiry.filter(t => {
+          if (t.isOwner || isTaskAdmin) return true;
+          return t.isApproved !== false;
         });
 
         // 若为注册不满 24 小时的新用户，则屏蔽报酬 > 5000 的任务（非本人）
@@ -849,13 +869,18 @@ export const Tasks: React.FC<TasksProps> = ({ onOpenChat, onOpenGroupChat }) => 
         reward: postForm.reward.trim() || '0',
         contact: contactStr,
         is_active: true,
+        is_approved: false, // 新发布的任务需要审核
         created_at: new Date().toISOString(),
         team_size: postTab === 'team' ? parseInt(postForm.teamSize) || 2 : 0,
         current_team_count: 1 // 发布者自己算1人
       }]);
 
       if (error) throw error;
-      showNotice('任务发布成功');
+
+      // 发送通知给所有审核管理员
+      await sendTaskPendingNotification(postForm.title.trim());
+
+      showNotice('任务已提交，等待审核管理员审核');
       setIsPostModalOpen(false);
       setPostForm({ title: '', domain: '家装', reward: '', desc: '', wechat: '', phone: '', qrFile: null, qrPreview: '', teamSize: '' });
       fetchTasks();
@@ -868,6 +893,35 @@ export const Tasks: React.FC<TasksProps> = ({ onOpenChat, onOpenGroupChat }) => 
     }
   };
 
+  // 发送任务待审核通知给所有审核管理员
+  const sendTaskPendingNotification = async (taskTitle: string) => {
+    try {
+      // 获取所有审核管理员
+      const { data: admins } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('is_arena_admin', true);
+
+      if (admins && admins.length > 0) {
+        const notifications = admins.map(admin => ({
+          user_id: admin.id,
+          type: 'task_pending',
+          title: '新任务待审核',
+          content: `用户发布了新任务"${taskTitle}"，请及时审核`,
+          is_read: false,
+          related_link: '/task-management'
+        }));
+
+        const { error } = await supabase.from('notifications').insert(notifications);
+        if (error) {
+          console.error('发送任务待审核通知失败:', error);
+        }
+      }
+    } catch (err) {
+      console.error('发送任务待审核通知失败:', err);
+    }
+  };
+
   const filteredTasks = tasks.filter(t => {
     const typeMatch = filterType === 'all' || (filterType === 'mine' ? !!t.isOwner : t.type === filterType);
     const domainMatch = filterDomain === 'all' || t.domain === filterDomain;
@@ -877,15 +931,15 @@ export const Tasks: React.FC<TasksProps> = ({ onOpenChat, onOpenGroupChat }) => 
   let displayedTasks = filteredTasks;
   if (filterType === 'mine') {
     if (personalTab === 'posted') {
-      // 我发布的：显示所有自己的任务（包括下架的）
+      // 我发布的：显示所有自己的任务（包括下架的、待审核的）
       displayedTasks = tasks.filter(t => t.isOwner && (filterDomain === 'all' || t.domain === filterDomain));
     } else {
       // 我的接单：显示接单的任务
       displayedTasks = tasks.filter(t => claimedTaskIds.includes(t.id) && (filterDomain === 'all' || t.domain === filterDomain));
     }
   } else if (filterType === 'all') {
-    // 任务大厅：不显示下架的任务
-    displayedTasks = tasks.filter(t => t.isActive);
+    // 任务大厅：不显示下架的任务，只显示已审核通过的任务
+    displayedTasks = tasks.filter(t => t.isActive && t.isApproved !== false);
   }
 
   return (
@@ -997,6 +1051,7 @@ export const Tasks: React.FC<TasksProps> = ({ onOpenChat, onOpenGroupChat }) => 
                       {!task.isCompleted && task.confirmedByClaimant && <span className="text-[10px] text-blue-500 font-bold bg-blue-500/10 px-2 py-0.5 rounded">● 等待发布者确认</span>}
                       {isExpired && <span className="text-[10px] text-red-500 font-bold bg-red-500/10 px-2 py-0.5 rounded">● 任务已过期（大厅不可见）</span>}
                       {isInactive && <span className="text-[10px] text-slate-400 font-bold bg-slate-700/10 px-2 py-0.5 rounded">● 未上架</span>}
+                      {task.isOwner && task.isApproved === false && <span className="text-[10px] text-purple-500 font-bold bg-purple-500/10 px-2 py-0.5 rounded">● 待审核</span>}
                     </div>
                     <div className="text-right text-2xl font-black text-orange-400">{task.type === 'bounty' ? `¥${task.rewardValue}` : task.rewardValue}</div>
                   </div>
@@ -1174,6 +1229,11 @@ export const Tasks: React.FC<TasksProps> = ({ onOpenChat, onOpenGroupChat }) => 
                     <Clock size={12} className="inline mr-1" />
                     {calculateTimeLeft(selectedTask.createdAt)}
                   </span>
+                  {selectedTask.isApproved === false && (
+                    <span className="text-xs px-3 py-1 rounded-full font-medium text-purple-400 bg-purple-500/10 border border-purple-500/30">
+                      待审核
+                    </span>
+                  )}
                 </div>
                 <h2 className="text-2xl font-bold text-white mb-2">{selectedTask.title}</h2>
                 <div className="text-3xl font-black text-orange-400">

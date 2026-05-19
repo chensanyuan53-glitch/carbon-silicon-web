@@ -11,6 +11,7 @@ export type CreateArenaInput = {
   deadline: string; // ISO string
   status?: 'recruiting' | 'reviewing' | 'finished' | string;
   mode?: 'pitch' | 'benchmark' | 'speed' | null;
+  is_approved?: boolean;
 };
 
 export async function fetchArenas(): Promise<(Arena & { submission_count: number })[]> {
@@ -88,6 +89,7 @@ export async function createArena(input: CreateArenaInput): Promise<Arena> {
     domain: input.domain ?? null,
     contact_info: input.contact_info ?? null,
     mode: input.mode ?? null,
+    is_approved: input.is_approved ?? false,
   };
   const { data, error } = await supabase
     .from('arenas')

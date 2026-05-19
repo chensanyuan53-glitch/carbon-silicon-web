@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import type { Session } from '@supabase/supabase-js';
-import { ArrowLeft, Send, FileText, Lightbulb, BarChart3, Zap, PowerOff, AlertTriangle, X } from 'lucide-react';
+import { ArrowLeft, Send, FileText, Lightbulb, BarChart3, Zap, PowerOff, AlertTriangle, X, Shield, CheckCircle } from 'lucide-react';
 import {
   fetchArenaDetail,
   fetchSubmissions,
@@ -18,6 +18,7 @@ interface ArenaDetailProps {
   session: Session | null;
   onBack: () => void;
   onNavigate?: (page: Page) => void;
+  onApproveSuccess?: () => void;
 }
 
 const STATUS_LABEL: Record<string, string> = {
@@ -62,6 +63,7 @@ export const ArenaDetail: React.FC<ArenaDetailProps> = ({
   session,
   onBack,
   onNavigate,
+  onApproveSuccess,
 }) => {
   const [arena, setArena] = useState<ArenaType | null>(null);
   const [submissions, setSubmissions] = useState<ArenaSubmission[]>([]);
@@ -78,6 +80,25 @@ export const ArenaDetail: React.FC<ArenaDetailProps> = ({
   const [offlineModalOpen, setOfflineModalOpen] = useState(false);
   const [offlining, setOfflining] = useState(false);
   const [toast, setToast] = useState<{ visible: boolean; message: string; type?: 'success' | 'error' | 'info' }>({ visible: false, message: '', type: 'info' });
+  const [isArenaAdmin, setIsArenaAdmin] = useState(false);
+  const [processing, setProcessing] = useState(false);
+
+  // 检查是否为审核管理员
+  useEffect(() => {
+    const checkArenaAdmin = async () => {
+      if (!session?.user?.id) {
+        setIsArenaAdmin(false);
+        return;
+      }
+      const { data } = await supabase
+        .from('profiles')
+        .select('is_arena_admin')
+        .eq('id', session.user.id)
+        .single();
+      setIsArenaAdmin(data?.is_arena_admin || false);
+    };
+    checkArenaAdmin();
+  }, [session]);
 
   const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
     setToast({ visible: true, message, type });
@@ -169,6 +190,34 @@ export const ArenaDetail: React.FC<ArenaDetailProps> = ({
     }
   };
 
+  // 审核通过
+  const handleApprove = async () => {
+    if (!session?.user?.id) return;
+    setProcessing(true);
+    try {
+      const { error } = await supabase
+        .from('arenas')
+        .update({
+          is_approved: true,
+          approved_at: new Date().toISOString(),
+          approved_by: session.user.id
+        })
+        .eq('id', arenaId);
+      if (error) throw error;
+      showToast('审核已通过', 'success');
+      // 延迟返回列表，让用户看到成功提示
+      setTimeout(() => {
+        onApproveSuccess?.();
+        onBack();
+      }, 1000);
+    } catch (err) {
+      console.error('Failed to approve arena:', err);
+      showToast('审核失败，请重试', 'error');
+    } finally {
+      setProcessing(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 pt-8 pb-20">
@@ -221,16 +270,29 @@ export const ArenaDetail: React.FC<ArenaDetailProps> = ({
           >
             <ArrowLeft size={18} /> 返回列表
           </button>
-          {isCreator && arena?.status !== 'finished' && (
-            <button
-              type="button"
-              onClick={() => setOfflineModalOpen(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-red-600/20 hover:bg-red-600/30 text-red-400 border border-red-500/30 rounded-xl font-medium transition-colors"
-            >
-              <PowerOff size={16} />
-              下架竞技场
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            {isArenaAdmin && !arena?.is_approved && (
+              <button
+                type="button"
+                onClick={handleApprove}
+                disabled={processing}
+                className="flex items-center gap-2 px-4 py-2 bg-green-600/20 hover:bg-green-600/30 text-green-400 border border-green-500/30 rounded-xl font-medium transition-colors disabled:opacity-50"
+              >
+                <CheckCircle size={16} />
+                {processing ? '处理中...' : '通过审核'}
+              </button>
+            )}
+            {isCreator && arena?.status !== 'finished' && (
+              <button
+                type="button"
+                onClick={() => setOfflineModalOpen(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-red-600/20 hover:bg-red-600/30 text-red-400 border border-red-500/30 rounded-xl font-medium transition-colors"
+              >
+                <PowerOff size={16} />
+                下架竞技场
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="rounded-2xl border border-slate-700 bg-slate-800/90 p-6 mb-8 shadow-xl shadow-black/20">
@@ -260,6 +322,18 @@ export const ArenaDetail: React.FC<ArenaDetailProps> = ({
             {arena?.prize_structure && typeof arena.prize_structure === 'object' && Object.keys(arena.prize_structure).length > 0 && (
               <span className="text-slate-400">
                 奖金结构：{Object.entries(arena.prize_structure).map(([k, v]) => `${k}: ¥${v}`).join('，')}
+              </span>
+            )}
+            {isArenaAdmin && !arena?.is_approved && (
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/30">
+                <Shield size={12} />
+                待审核
+              </span>
+            )}
+            {arena?.is_approved && (
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-green-500/15 text-green-400 border border-green-500/30">
+                <CheckCircle size={12} />
+                已通过审核
               </span>
             )}
           </div>

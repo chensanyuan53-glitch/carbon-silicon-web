@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, ChevronRight, ExternalLink, Zap, Layout, Sprout, Briefcase, Cpu, PenTool, Globe, Trash } from 'lucide-react';
+import { Search, ChevronRight, ExternalLink, Zap, Layout, Sprout, Briefcase, Cpu, PenTool, Globe, Trash, Pin, PinOff } from 'lucide-react';
 import { supabase } from '../src/supabaseClient';
 import { AiCategory, AiTool } from '../types';
 
@@ -65,7 +65,8 @@ export const Station: React.FC<StationProps> = ({ initialTab }) => {
     try {
       const { data, error } = await supabase
         .from('ai_news')
-        .select('id, title, tag, link, source, created_at')
+        .select('id, title, tag, link, source, created_at, is_pinned')
+        .order('is_pinned', { ascending: false })
         .order('created_at', { ascending: false })
         .limit(50);
       if (error) {
@@ -84,6 +85,7 @@ export const Station: React.FC<StationProps> = ({ initialTab }) => {
           link: r.link || '#',
           source: r.source || '',
           id: r.id,
+          is_pinned: r.is_pinned || false,
         };
       });
       setNewsData(rows);
@@ -341,29 +343,67 @@ export const Station: React.FC<StationProps> = ({ initialTab }) => {
               </div>
             ) : (
               filteredNews.map((item, index) => (
-                <a key={index} href={item.link || '#'} target="_blank" rel="noreferrer" className="block">
-                  <div
-                    className="group flex items-center justify-between p-5 md:p-7 border-b border-slate-700/50 last:border-0 hover:bg-slate-800 transition-colors cursor-pointer"
-                  >
-                    <div className="flex items-center gap-6 md:gap-8 overflow-hidden">
-                      <span className="text-slate-500 font-mono text-sm whitespace-nowrap">{item.date}</span>
-                      <div className="flex flex-col md:flex-row md:items-center gap-2 md:gap-4 overflow-hidden">
-                        <span className="text-cyan-500 bg-cyan-950/30 px-2.5 py-0.5 rounded text-xs border border-cyan-500/20 whitespace-nowrap w-fit font-medium">
-                          {item.tag}
-                        </span>
-                        <div className="flex flex-col overflow-hidden">
+                <div key={index} className={`group flex items-center justify-between p-5 md:p-7 border-b border-slate-700/50 last:border-0 hover:bg-slate-800 transition-colors cursor-pointer ${item.is_pinned ? 'bg-amber-900/10' : ''}`}>
+                  <a href={item.link || '#'} target="_blank" rel="noreferrer" className="flex items-center gap-6 md:gap-8 overflow-hidden flex-1">
+                    <span className="text-slate-500 font-mono text-sm whitespace-nowrap">{item.date}</span>
+                    <div className="flex flex-col md:flex-row md:items-center gap-2 md:gap-4 overflow-hidden">
+                      <span className="text-cyan-500 bg-cyan-950/30 px-2.5 py-0.5 rounded text-xs border border-cyan-500/20 whitespace-nowrap w-fit font-medium">
+                        {item.tag}
+                      </span>
+                      <div className="flex flex-col overflow-hidden">
+                        <div className="flex items-center gap-2">
+                          {item.is_pinned && (
+                            <Pin size={14} className="text-amber-500 flex-shrink-0" />
+                          )}
                           <h3 className="text-white font-medium text-lg truncate group-hover:text-cyan-400 transition-colors tracking-wide">
                             {item.title}
                           </h3>
-                          {item.source && (
-                            <span className="text-slate-500 text-sm mt-1 truncate">来源：{item.source}</span>
-                          )}
                         </div>
+                        {item.source && (
+                          <span className="text-slate-500 text-sm mt-1 truncate">来源：{item.source}</span>
+                        )}
                       </div>
                     </div>
-                    <ChevronRight size={20} className="text-slate-600 group-hover:text-white transition-colors flex-shrink-0 ml-4" />
-                  </div>
-                </a>
+                  </a>
+                  {isAdmin && (
+                    <button
+                      onClick={async (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+
+                        if (!item.is_pinned) {
+                          // 检查当前置顶数量
+                          const pinnedCount = filteredNews.filter(n => n.is_pinned).length;
+                          if (pinnedCount >= 3) {
+                            showToast('最多只能置顶3条资讯，请先取消其他置顶', 'error');
+                            return;
+                          }
+                        }
+
+                        const { error } = await supabase
+                          .from('ai_news')
+                          .update({ is_pinned: !item.is_pinned })
+                          .eq('id', item.id);
+
+                        if (error) {
+                          showToast('操作失败: ' + error.message, 'error');
+                        } else {
+                          await fetchNews();
+                          showToast(item.is_pinned ? '已取消置顶' : '已置顶', 'success');
+                        }
+                      }}
+                      className={`ml-4 p-2 rounded-lg transition-colors flex-shrink-0 ${
+                        item.is_pinned
+                          ? 'bg-amber-600/30 text-amber-400 hover:bg-amber-600/50'
+                          : 'bg-slate-700 text-slate-400 hover:bg-slate-600 hover:text-white'
+                      }`}
+                      title={item.is_pinned ? '取消置顶' : '置顶'}
+                    >
+                      {item.is_pinned ? <PinOff size={16} /> : <Pin size={16} />}
+                    </button>
+                  )}
+                  <ChevronRight size={20} className="text-slate-600 group-hover:text-white transition-colors flex-shrink-0 ml-2" />
+                </div>
               ))
             )}
             {filteredNews.length > 0 && (

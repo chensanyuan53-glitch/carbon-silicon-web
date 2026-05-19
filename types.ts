@@ -9,7 +9,9 @@ export enum Page {
   PROFILE = 'profile',
   RESET_PASSWORD = 'reset-password',
   PROGRESS_REMINDERS = 'progress-reminders',
-  USER_MANAGEMENT = 'user-management'
+  USER_MANAGEMENT = 'user-management',
+  ARENA_MANAGEMENT = 'arena-management',
+  TASK_MANAGEMENT = 'task-management'
 }
 
 export interface Competition {
