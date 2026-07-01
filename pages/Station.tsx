@@ -26,9 +26,6 @@ export const Station: React.FC<StationProps> = ({ initialTab }) => {
     source: '',
     link: '',
     tag: '',
-    domain: '家装',
-    summary: '',
-    image_url: '',
     published: true,
   });
 
@@ -445,28 +442,9 @@ export const Station: React.FC<StationProps> = ({ initialTab }) => {
                     <label className="text-sm text-slate-300">链接（必填，点击跳转）</label>
                     <input name="link" value={form.link} onChange={(e) => setForm({ ...form, link: e.target.value })} placeholder="https://" className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 mt-2 text-sm text-white focus:outline-none focus:border-cyan-500" />
                   </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="text-sm text-slate-300">标签（例如：#大模型）</label>
-                      <input name="tag" value={form.tag} onChange={(e) => setForm({ ...form, tag: e.target.value })} placeholder="#大模型" className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 mt-2 text-sm text-white focus:outline-none focus:border-cyan-500" />
-                    </div>
-                    <div>
-                      <label className="text-sm text-slate-300">分类</label>
-                      <select name="domain" value={form.domain} onChange={(e) => setForm({ ...form, domain: e.target.value })} className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 mt-2 text-sm text-white focus:outline-none focus:border-cyan-500">
-                        <option>家装</option>
-                        <option>农业</option>
-                        <option>能源</option>
-                        <option>职场</option>
-                      </select>
-                    </div>
-                  </div>
                   <div>
-                    <label className="text-sm text-slate-300">摘要 / 内容摘录（可选）</label>
-                    <textarea name="summary" value={form.summary} onChange={(e) => setForm({ ...form, summary: e.target.value })} placeholder="在此输入摘要或站内摘录" rows={4} className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 mt-2 text-sm text-white focus:outline-none focus:border-cyan-500" />
-                  </div>
-                  <div>
-                    <label className="text-sm text-slate-300">缩略图 URL（可选）</label>
-                    <input name="image_url" value={form.image_url} onChange={(e) => setForm({ ...form, image_url: e.target.value })} placeholder="https://..." className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 mt-2 text-sm text-white focus:outline-none focus:border-cyan-500" />
+                    <label className="text-sm text-slate-300">标签（例如：#大模型）</label>
+                    <input name="tag" value={form.tag} onChange={(e) => setForm({ ...form, tag: e.target.value })} placeholder="#大模型" className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 mt-2 text-sm text-white focus:outline-none focus:border-cyan-500" />
                   </div>
                   <div className="flex items-center justify-end gap-3 pt-2">
                     <button onClick={() => setShowPublishModal(false)} className="px-4 py-2 rounded-full bg-slate-700 text-slate-300 hover:text-white transition-colors">取消</button>
@@ -487,11 +465,7 @@ export const Station: React.FC<StationProps> = ({ initialTab }) => {
                           title: form.title,
                           source: form.source,
                           tag: form.tag,
-                          summary: form.summary,
-                          content: form.summary,
                           link: form.link,
-                          image_url: form.image_url,
-                          domain: form.domain,
                           user_id: user.id,
                           published: form.published
                         }]);
@@ -501,7 +475,7 @@ export const Station: React.FC<StationProps> = ({ initialTab }) => {
                         } else {
                           await fetchNews();
                           setShowPublishModal(false);
-                          setForm({ title: '', source: '', link: '', tag: '', domain: '家装', summary: '', image_url: '', published: true });
+                          setForm({ title: '', source: '', link: '', tag: '', published: true });
                           showToast('发布成功', 'success');
                         }
                       }}

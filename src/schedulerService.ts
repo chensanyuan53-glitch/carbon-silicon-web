@@ -1,8 +1,8 @@
-import cron from 'node-cron';
+import nodeCron, { ScheduledTask } from 'node-cron';
 import { sendPendingReminders } from './progressReminderService';
 
 let isRunning = false;
-let task: cron.ScheduledTask | null = null;
+let task: ScheduledTask | null = null;
 
 /**
  * 启动定时任务
@@ -14,7 +14,7 @@ export function startScheduler() {
     return;
   }
 
-  task = cron.schedule('0 * * * *', async () => {
+  task = nodeCron.schedule('0 * * * *', async () => {
     console.log('开始检查待发送的进度提醒...');
     
     try {

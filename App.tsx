@@ -23,6 +23,7 @@ import { AIChat } from './components/AIChat';
 import { ChatDialog } from './components/ChatDialog';
 import { GroupChatDialog } from './components/GroupChatDialog';
 import { startScheduler } from './src/schedulerService';
+import { sendReviewReminders } from './src/reviewReminderService';
 
 interface ChatTask {
   taskId: string;
@@ -70,6 +71,21 @@ function App() {
     // 页面关闭时取消监听
     return () => subscription.unsubscribe();
   }, [currentPage]);
+
+  // 审核提醒轮询：每分钟检查是否有超过10分钟未审核的任务/竞技场
+  useEffect(() => {
+    if (!session) return;
+
+    // 立即执行一次
+    sendReviewReminders().catch(err => console.error('审核提醒检查失败:', err));
+
+    // 每分钟检查一次
+    const timer = setInterval(() => {
+      sendReviewReminders().catch(err => console.error('审核提醒检查失败:', err));
+    }, 60 * 1000);
+
+    return () => clearInterval(timer);
+  }, [session]);
 
     // 检查 URL 参数，如果有 topic 或 product 则跳转到对应详情页
     useEffect(() => {

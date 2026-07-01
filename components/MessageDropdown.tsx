@@ -495,6 +495,20 @@ export const MessageDropdown: React.FC<MessageDropdownProps> = ({ currentUserId,
       return;
     }
 
+    // 处理任务审核提醒通知（10分钟未审核重发）
+    if (notification.type === 'task_pending_reminder' && onNavigate) {
+      onNavigate('task-management');
+      setIsOpen(false);
+      return;
+    }
+
+    // 处理竞技场审核提醒通知（10分钟未审核重发）
+    if (notification.type === 'arena_pending_reminder' && onNavigate) {
+      onNavigate('arena-management');
+      setIsOpen(false);
+      return;
+    }
+
     setIsOpen(false);
   };
 
